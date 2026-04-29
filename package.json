@@ -12,7 +12,15 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "axios": "^1.15.0",
+    "axios": "^1.15.2",
     "express": "^5.2.1"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/elviejitos11-creator/jean-carlos-bot.git"
+  },
+  "bugs": {
+    "url": "https://github.com/elviejitos11-creator/jean-carlos-bot/issues"
+  },
+  "homepage": "https://github.com/elviejitos11-creator/jean-carlos-bot#readme"
 }

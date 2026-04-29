@@ -10,14 +10,15 @@
     "foto_modelo": "https://picsum.photos/400/260",
     "foto_pagina": "https://picsum.photos/420/280",
     "historial_fotos": [],
-    "ultima_hora": "N/A",
+    "ultima_hora": "29/4/2026, 7:13:47 a. m.",
     "proximo_post": "16m",
     "proximo_post_ts": null,
-    "fin_plan": "7 días",
-    "ultima_accion": "Creado",
+    "fin_plan": "2026-05-07T03:59:59",
+    "ultima_accion": "Perfil editado desde panel",
     "ultimo_evento": null,
     "bump_hoy": 0,
     "bump_total": 0,
-    "bump_fecha": ""
+    "bump_fecha": "",
+    "ultimaAccion": "Perfil editado desde panel"
   }
 }
