@@ -1,12 +1,23 @@
 {
-  "name": "jean-carlos-bot",
-  "version": "1.0.0",
-  "main": "server.js",
-  "scripts": {
-    "start": "node server.js"
-  },
-  "dependencies": {
-    "axios": "^1.7.2",
-    "express": "^4.19.2"
+  "1": {
+    "nombre": "Perfil 1",
+    "chat_id": "",
+    "telefono": "",
+    "codigo": "",
+    "ubicacion": "",
+    "texto": "",
+    "estado": "ACTIVA",
+    "foto_modelo": "https://picsum.photos/400/260",
+    "foto_pagina": "https://picsum.photos/420/280",
+    "historial_fotos": [],
+    "ultima_hora": "N/A",
+    "proximo_post": "16m",
+    "proximo_post_ts": null,
+    "fin_plan": "7 días",
+    "ultima_accion": "Creado",
+    "ultimo_evento": null,
+    "bump_hoy": 0,
+    "bump_total": 0,
+    "bump_fecha": ""
   }
 }
