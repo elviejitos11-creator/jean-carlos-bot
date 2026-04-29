@@ -1,22 +1,12 @@
+{
+  "name": "jean-carlos-bot",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
   },
-  "1": {
-    "nombre": "Perfil 1",
-    "chat_id": "-1002020202020",
-    "telefono": "809-000-0020",
-    "codigo": "AAA020",
-    "ubicacion": "Baní",
-    "texto": "",
-    "estado": "PAUSADA",
-    "foto_modelo": "https://picsum.photos/420/260",
-    "foto_pagina": "https://picsum.photos/440/280",
-    "ultima_hora": "8/4/2026, 11:16:55 p. m.",
-    "proximo_post": "16m",
-    "proximo_post_ts": null,
-    "fin_plan": "7 días",
-    "ultima_accion": "Pausado globalmente",
-    "ultimo_evento": null,
-    "bump_hoy": 0,
-    "bump_total": 0,
-    "bump_fecha": ""
+  "dependencies": {
+    "axios": "^1.7.2",
+    "express": "^4.19.2"
   }
 }
