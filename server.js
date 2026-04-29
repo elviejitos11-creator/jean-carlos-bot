@@ -16,7 +16,7 @@ app.use((req, res, next) => {
 const PORT = 3003;
 
 // CAMBIA ESTAS 4 COSAS
-const BOT_TOKEN = '';
+const BOT_TOKEN = '8670917706:AAEp7uHCGx3FhHdMMw_tMQJWyOiTVGTHHKU';
 const CHAT_ID = '';
 const SUPPORT_URL = 'https://t.me/tu_soporte';
 const RULES_TEXT = `📜 Reglas del sistema
