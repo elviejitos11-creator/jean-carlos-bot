@@ -3,13 +3,21 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 
+let FormData = null;
+
+try {
+  FormData = require('form-data');
+} catch (e) {
+  console.log('⚠️ Falta form-data. Corre: npm install form-data');
+}
+
 const app = express();
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '25mb' }));
+app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "*");
-  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, X-Cliente-Token");
   next();
 });
 
@@ -37,6 +45,23 @@ const STATE_BACKUP_FILE = path.join(__dirname, 'bot_state.backup.json');
 // =========================
 let telegramEnProceso = false;
 let cicloEnProceso = false;
+
+// =========================
+// COLA DE REANUDACIÓN
+// =========================
+let colaReanudacion = null;
+let colaTimeout = null;
+let colaVersion = 0;
+
+function cancelarColaReanudacion() {
+  if (colaTimeout) {
+    clearTimeout(colaTimeout);
+    colaTimeout = null;
+  }
+
+  colaReanudacion = null;
+  colaVersion += 1;
+}
 
 // =========================
 // UTILIDADES SEGURAS JSON
@@ -181,11 +206,19 @@ function fechaHoy() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function generarTokenAcceso() {
+  const parte1 = Math.floor(1000 + Math.random() * 9000);
+  const parte2 = Math.random().toString(36).slice(2, 6).toUpperCase();
+  const parte3 = Math.random().toString(36).slice(2, 6).toUpperCase();
+  return `${parte1}-${parte2}-${parte3}`;
+}
+
 function asegurarPerfil(data, id) {
   if (!data[id]) {
     data[id] = {
       nombre: `Perfil ${id}`,
       chat_id: '',
+      cliente_token: '',
       telefono: '',
       codigo: '',
       ubicacion: '',
@@ -193,6 +226,7 @@ function asegurarPerfil(data, id) {
       estado: 'ACTIVA',
       foto_modelo: 'https://picsum.photos/400/260',
       foto_pagina: 'https://picsum.photos/420/280',
+      foto_bump: '',
       historial_fotos: [],
       ultima_hora: 'N/A',
       proximo_post: '16m',
@@ -211,6 +245,10 @@ function asegurarPerfil(data, id) {
     if (!('proximo_post_ts' in data[id])) data[id].proximo_post_ts = null;
     if (!Array.isArray(data[id].historial_fotos)) data[id].historial_fotos = [];
     if (!data[id].estado) data[id].estado = 'ACTIVA';
+    if (!('cliente_token' in data[id])) data[id].cliente_token = '';
+    if (!('foto_bump' in data[id])) data[id].foto_bump = '';
+    if (!('foto_modelo' in data[id])) data[id].foto_modelo = 'https://picsum.photos/400/260';
+    if (!('foto_pagina' in data[id])) data[id].foto_pagina = 'https://picsum.photos/420/280';
   }
 }
 
@@ -257,6 +295,23 @@ function tiempoRestantePlan(fechaFin) {
   return `${dias} días, ${horas}h ${minutos}m ${segundos}s`;
 }
 
+function planVencido(perfil) {
+  if (!perfil || !perfil.fin_plan) return false;
+
+  const fin = new Date(perfil.fin_plan);
+
+  if (isNaN(fin.getTime())) return false;
+
+  return fin <= new Date();
+}
+
+function puedeContarBump(perfil) {
+  if (!perfil) return false;
+  if (perfil.estado === 'PAUSADA') return false;
+  if (planVencido(perfil)) return false;
+  return true;
+}
+
 function convertirFinPlan(valor) {
   if (!valor) return '';
 
@@ -276,6 +331,23 @@ function convertirFinPlan(valor) {
   }
 
   return valor;
+}
+
+function tokenDesdeRequest(req) {
+  return String(
+    req.query?.token ||
+    req.body?.token ||
+    req.headers['x-cliente-token'] ||
+    ''
+  ).trim();
+}
+
+function tokenValidoParaPerfil(req, perfil) {
+  const token = tokenDesdeRequest(req);
+
+  if (!perfil.cliente_token) return true;
+
+  return token === String(perfil.cliente_token).trim();
 }
 
 // =========================
@@ -310,8 +382,7 @@ function tecladoTelegram(id) {
         { text: '📸 Ver una foto', callback_data: `foto_${id}` }
       ],
       [
-        { text: '📂 Ver últimas 3', callback_data: `fotos3_${id}` },
-        { text: '🗂 Ver últimas 4', callback_data: `fotos4_${id}` }
+        { text: '🗂 Ver álbum completo', callback_data: `album_${id}` }
       ]
     ]
   };
@@ -338,6 +409,29 @@ async function apiTelegram(method, payload) {
 
     console.log(`Error Telegram ${method}:`);
     console.log(msg);
+    return null;
+  }
+}
+
+async function apiTelegramForm(method, form) {
+  try {
+    const headers = form.getHeaders ? form.getHeaders() : {};
+
+    const res = await axios.post(
+      `https://api.telegram.org/bot${BOT_TOKEN}/${method}`,
+      form,
+      {
+        headers,
+        timeout: 60000,
+        maxBodyLength: Infinity,
+        maxContentLength: Infinity
+      }
+    );
+
+    return res.data;
+  } catch (error) {
+    console.log(`Error Telegram FORM ${method}:`);
+    console.log(error.response?.data || error.message || error);
     return null;
   }
 }
@@ -376,6 +470,63 @@ async function enviarFoto(photo, caption, id) {
       reply_markup: tecladoTelegram(id)
     });
   }
+
+  return !!(res && res.ok);
+}
+
+function esImagenBase64(valor) {
+  return typeof valor === 'string' && valor.startsWith('data:image/');
+}
+
+function bufferDesdeBase64(valor) {
+  const limpio = String(valor || '').replace(/^data:image\/\w+;base64,/, '');
+  return Buffer.from(limpio, 'base64');
+}
+
+async function enviarBufferComoFoto(buffer, caption, id, filename = 'ultimo_bump.jpg') {
+  const data = leerData();
+  const perfil = data[id];
+  const destino = perfil?.chat_id || CHAT_ID;
+
+  if (!FormData) {
+    await enviarTexto('⚠️ Falta form-data. Corre: npm install form-data', destino, id);
+    return false;
+  }
+
+  const form = new FormData();
+  form.append('chat_id', String(destino));
+  form.append('caption', caption);
+  form.append('reply_markup', JSON.stringify(tecladoTelegram(id)));
+  form.append('photo', buffer, {
+    filename,
+    contentType: 'image/jpeg'
+  });
+
+  const res = await apiTelegramForm('sendPhoto', form);
+
+  if (res && res.ok) return true;
+
+  await apiTelegram('sendMessage', {
+    chat_id: destino,
+    text: caption,
+    reply_markup: tecladoTelegram(id)
+  });
+
+  return false;
+}
+
+async function enviarFotoFlexible(photo, caption, id) {
+  if (esImagenBase64(photo)) {
+    try {
+      const buffer = bufferDesdeBase64(photo);
+      return await enviarBufferComoFoto(buffer, caption, id, `ultimo_bump_${id}.jpg`);
+    } catch (e) {
+      console.log('No se pudo enviar foto base64:', e.message);
+      return false;
+    }
+  }
+
+  return await enviarFoto(photo, caption, id);
 }
 
 // =========================
@@ -386,6 +537,11 @@ function cambiarEstadoPerfil(id, estado) {
   if (!data[id]) return false;
 
   asegurarPerfil(data, id);
+
+  if (estado === 'PAUSADA' && Array.isArray(colaReanudacion)) {
+    colaReanudacion = colaReanudacion.filter(x => String(x) !== String(id));
+  }
+
   data[id].estado = estado;
   data[id].ultima_hora = horaActual();
   data[id].ultima_accion = estado === 'ACTIVA' ? 'Reanudado' : 'Pausado';
@@ -394,7 +550,12 @@ function cambiarEstadoPerfil(id, estado) {
 }
 
 function cambiarEstadoTodos(estado) {
+  if (estado === 'PAUSADA') {
+    cancelarColaReanudacion();
+  }
+
   const data = leerData();
+
   for (const id of Object.keys(data)) {
     asegurarPerfil(data, id);
     data[id].estado = estado;
@@ -402,7 +563,50 @@ function cambiarEstadoTodos(estado) {
     data[id].ultima_accion =
       estado === 'ACTIVA' ? 'Reanudado globalmente' : 'Pausado globalmente';
   }
+
   guardarData(data);
+}
+
+function resetearAccesoPerfil(id) {
+  const data = leerData();
+  if (!data[id]) return null;
+
+  asegurarPerfil(data, id);
+
+  const nuevoToken = generarTokenAcceso();
+
+  data[id].cliente_token = nuevoToken;
+  data[id].estado = 'PAUSADA';
+
+  // LIMPIEZA COMPLETA PARA CLIENTE NUEVO
+  data[id].telefono = '';
+  data[id].codigo = '';
+  data[id].ubicacion = '';
+  data[id].texto = '';
+
+  // BORRAR FOTOS VIEJAS
+  data[id].foto_modelo = 'https://picsum.photos/400/260';
+  data[id].foto_pagina = 'https://picsum.photos/420/280';
+  data[id].foto_bump = '';
+  data[id].historial_fotos = [];
+
+  // RESETEAR CONTADORES
+  data[id].bump_hoy = 0;
+  data[id].bump_total = 0;
+  data[id].bump_fecha = '';
+  data[id].proximo_post = '16m';
+  data[id].proximo_post_ts = null;
+
+  // LIMPIAR EVENTOS
+  data[id].ultimo_evento = null;
+  data[id].ultima_hora = horaActual();
+  data[id].ultima_accion = `Acceso reseteado y perfil limpiado. Nueva clave: ${nuevoToken}`;
+
+  const ok = guardarData(data);
+
+  if (!ok) return null;
+
+  return nuevoToken;
 }
 
 function programarAccion(id, accion, minutos = 30) {
@@ -423,7 +627,7 @@ async function enviarEstadoPerfil(id) {
   const perfil = data[id];
   if (!perfil) return;
 
-  const caption = `🔥 jean carlos BOT 🔥
+  const caption = `🔥 jean calos BOT 🔥
 
 Perfil: ${perfil.nombre}
 📞 Teléfono: ${perfil.telefono}
@@ -462,6 +666,11 @@ async function enviarUltimaActualizacion(id) {
 📊 Bump hoy: ${perfil.bump_hoy || 0}
 📈 Bump total: ${perfil.bump_total || 0}`;
 
+  if (perfil.foto_bump) {
+    const ok = await enviarFotoFlexible(perfil.foto_bump, caption, id);
+    if (ok) return;
+  }
+
   await enviarFoto(perfil.foto_modelo, caption, id);
 }
 
@@ -497,6 +706,45 @@ async function enviarUltimasFotos(id, cantidad) {
   }
 }
 
+async function enviarAlbumCompleto(id) {
+  const data = leerData();
+  const perfil = data[id];
+  if (!perfil) return;
+
+  const destino = perfil?.chat_id || CHAT_ID;
+  const fotos = Array.isArray(perfil.historial_fotos) ? perfil.historial_fotos : [];
+
+  if (fotos.length === 0) {
+    await enviarTexto(`⚠️ No hay fotos guardadas para el perfil ${id}`, destino, id);
+    return;
+  }
+
+  const lista = fotos.filter(Boolean).slice(0, 10);
+
+  if (lista.length === 1) {
+    await enviarFoto(lista[0], `🗂 Álbum completo\nFoto 1 de 1`, id);
+    return;
+  }
+
+  const media = lista.map((foto, index) => ({
+    type: 'photo',
+    media: foto,
+    caption: index === 0 ? `🗂 Álbum completo\n${lista.length} fotos guardadas` : undefined
+  }));
+
+  const res = await apiTelegram('sendMediaGroup', {
+    chat_id: destino,
+    media
+  });
+
+  if (!res || !res.ok) {
+    await enviarUltimasFotos(id, 10);
+    return;
+  }
+
+  await enviarTexto('🗂 Álbum completo enviado.', destino, id);
+}
+
 async function enviarReglas(chatId = CHAT_ID) {
   await enviarTexto(RULES_TEXT, chatId);
 }
@@ -504,20 +752,81 @@ async function enviarReglas(chatId = CHAT_ID) {
 // =========================
 // API LOCAL
 // =========================
+app.get('/api/licencia/:id', (req, res) => {
+  try {
+    const id = req.params.id;
+    const token = req.query.token || '';
+
+    const data = leerData();
+    const perfil = data[id];
+
+    if (!perfil) {
+      return res.json({
+        ok: false,
+        estado: 'NO_EXISTE',
+        motivo: 'Perfil no existe'
+      });
+    }
+
+    if (perfil.cliente_token && token !== perfil.cliente_token) {
+      return res.json({
+        ok: false,
+        estado: 'TOKEN_INVALIDO',
+        motivo: 'Token inválido'
+      });
+    }
+
+    if (perfil.estado === 'PAUSADA') {
+      return res.json({
+        ok: false,
+        estado: 'PAUSADA',
+        motivo: 'Cliente pausado desde el panel'
+      });
+    }
+
+    if (planVencido(perfil)) {
+      return res.json({
+        ok: false,
+        estado: 'VENCIDA',
+        motivo: 'Plan vencido'
+      });
+    }
+
+    return res.json({
+      ok: true,
+      estado: 'ACTIVA',
+      motivo: 'Licencia activa'
+    });
+  } catch (error) {
+    console.log('Error en /api/licencia/:id =>', error?.message || error);
+
+    return res.json({
+      ok: false,
+      estado: 'ERROR',
+      motivo: 'Error verificando licencia'
+    });
+  }
+});
+
 app.get('/api/estado/:id', (req, res) => {
   try {
     const data = leerData();
     const perfil = data[req.params.id];
 
-    // SOLO pausa si está guardado explícitamente como PAUSADA
-    if (perfil && perfil.estado === 'PAUSADA') {
+    if (!perfil) {
+      return res.json({
+        estado: 'NO_EXISTE',
+        motivo: 'Perfil no existe'
+      });
+    }
+
+    if (perfil.estado === 'PAUSADA') {
       return res.json({
         estado: 'PAUSADA',
         motivo: 'Pausada por orden explícita del panel'
       });
     }
 
-    // Si falta perfil, si hay duda, si algo raro pasa => ACTIVA
     return res.json({
       estado: 'ACTIVA',
       motivo: 'Modo seguro: solo se pausa por orden explícita'
@@ -525,10 +834,9 @@ app.get('/api/estado/:id', (req, res) => {
   } catch (error) {
     console.log('Error en /api/estado/:id =>', error?.message || error);
 
-    // Ante cualquier fallo, JAMÁS apagar por defecto
     return res.json({
-      estado: 'ACTIVA',
-      motivo: 'Fallo del panel/lectura: se mantiene ACTIVA'
+      estado: 'ERROR',
+      motivo: 'Fallo del panel/lectura'
     });
   }
 });
@@ -536,14 +844,16 @@ app.get('/api/estado/:id', (req, res) => {
 app.post('/registrar-evento', async (req, res) => {
   const {
     id,
-    tipo = 'evento',
+    tipo = 'silencioso',
     telefono,
     codigo,
     ubicacion,
     texto,
-    estado,
     foto_modelo,
     foto_pagina,
+    foto_bump,
+    foto_bump_base64,
+    fotos_pagina,
     fin_plan,
     ultima_accion,
     ultima_hora,
@@ -554,31 +864,84 @@ app.post('/registrar-evento', async (req, res) => {
     return res.status(400).json({ ok: false, error: 'Falta id' });
   }
 
+  const tipoNormal = String(tipo || 'silencioso').trim().toLowerCase();
+
   const data = leerData();
   asegurarPerfil(data, id);
 
   const perfil = data[id];
 
+  if (!tokenValidoParaPerfil(req, perfil)) {
+    return res.status(403).json({
+      ok: false,
+      estado: 'TOKEN_INVALIDO',
+      error: 'Token inválido para registrar evento'
+    });
+  }
+
   if (telefono) perfil.telefono = telefono;
   if (codigo) perfil.codigo = codigo;
   if (ubicacion) perfil.ubicacion = ubicacion;
   if (typeof texto === 'string') perfil.texto = texto;
-  if (estado) perfil.estado = estado;
+
+  // IMPORTANTE:
+  // /registrar-evento NO puede cambiar estado.
+  // Solo el panel/botones pueden poner ACTIVA o PAUSADA.
+
   if (foto_modelo) perfil.foto_modelo = foto_modelo;
   if (foto_pagina) perfil.foto_pagina = foto_pagina;
+
+  const pruebaBump = foto_bump_base64 || foto_bump;
+  if (pruebaBump && typeof pruebaBump === 'string') {
+    perfil.foto_bump = pruebaBump;
+  }
+
+  if (Array.isArray(fotos_pagina)) {
+    const fotosLimpias = fotos_pagina
+      .filter(foto => foto && typeof foto === 'string')
+      .slice(0, 10);
+
+    if (fotosLimpias.length >= 3) {
+      perfil.historial_fotos = fotosLimpias;
+      perfil.foto_pagina = fotosLimpias[0] || perfil.foto_pagina;
+      perfil.foto_modelo = fotosLimpias[0] || perfil.foto_modelo;
+    } else if (
+      fotosLimpias.length === 1 &&
+      (!Array.isArray(perfil.historial_fotos) || perfil.historial_fotos.length === 0)
+    ) {
+      perfil.historial_fotos = fotosLimpias;
+      perfil.foto_pagina = fotosLimpias[0];
+      perfil.foto_modelo = fotosLimpias[0];
+    }
+  }
+
   if (fin_plan) perfil.fin_plan = convertirFinPlan(fin_plan);
 
   perfil.ultima_hora = ultima_hora || horaActual();
-  perfil.ultima_accion = ultima_accion || tipo;
-  perfil.ultimo_evento = { tipo, hora: perfil.ultima_hora };
+  perfil.ultima_accion = ultima_accion || tipoNormal;
+  perfil.ultimo_evento = { tipo: tipoNormal, hora: perfil.ultima_hora };
 
-  if (tipo === 'publicado' || tipo === 'evento') {
-    resetBumpSiCambioDia(perfil);
-    perfil.bump_hoy = (perfil.bump_hoy || 0) + 1;
-    perfil.bump_total = (perfil.bump_total || 0) + 1;
-    perfil.bump_fecha = fechaHoy();
-    perfil.proximo_post_ts = Date.now() + Number(minutos_siguientes) * 60 * 1000;
-    perfil.proximo_post = tiempoProximoPost(perfil);
+  let contarBump = false;
+
+  if (tipoNormal === 'publicado') {
+    if (puedeContarBump(perfil)) {
+      contarBump = true;
+
+      resetBumpSiCambioDia(perfil);
+      perfil.bump_hoy = (perfil.bump_hoy || 0) + 1;
+      perfil.bump_total = (perfil.bump_total || 0) + 1;
+      perfil.bump_fecha = fechaHoy();
+      perfil.proximo_post_ts = Date.now() + Number(minutos_siguientes) * 60 * 1000;
+      perfil.proximo_post = tiempoProximoPost(perfil);
+      perfil.ultima_accion = ultima_accion || 'Publicado con éxito';
+    } else {
+      perfil.ultima_accion = `Publicado ignorado: perfil ${perfil.estado}${planVencido(perfil) ? ' / vencido' : ''}`;
+      perfil.ultimo_evento = {
+        tipo: 'publicado_ignorado',
+        hora: perfil.ultima_hora,
+        motivo: perfil.estado === 'PAUSADA' ? 'PAUSADA' : (planVencido(perfil) ? 'VENCIDA' : 'BLOQUEADO')
+      };
+    }
   }
 
   const ok = guardarData(data);
@@ -587,9 +950,16 @@ app.post('/registrar-evento', async (req, res) => {
     return res.status(500).json({ ok: false, error: 'No se pudo guardar data.json' });
   }
 
-  await enviarUltimaActualizacion(id);
+  if (contarBump) {
+    await enviarUltimaActualizacion(id);
+  }
 
-  res.json({ ok: true, perfil: data[id] });
+  res.json({
+    ok: true,
+    tipo: tipoNormal,
+    bump_contado: contarBump,
+    perfil: data[id]
+  });
 });
 
 // =========================
@@ -601,16 +971,17 @@ async function procesarCallback(q) {
   const chatId = q.message?.chat?.id || CHAT_ID;
 
   if (data === 'pausar_todas') {
+    cancelarColaReanudacion();
     cambiarEstadoTodos('PAUSADA');
     await responderCallback(callbackId, 'Todas pausadas');
-    await enviarTexto('⏸ Todas las páginas quedaron en PAUSADA.', chatId);
+    await enviarTexto('⏸ Todas las páginas quedaron en PAUSADA. Cola cancelada.', chatId);
     return;
   }
 
   if (data === 'reanudar_todas') {
-    cambiarEstadoTodos('ACTIVA');
-    await responderCallback(callbackId, 'Todas reanudadas');
-    await enviarTexto('▶️ Todas las páginas quedaron en ACTIVA.', chatId);
+    reanudarTodasEnCola();
+    await responderCallback(callbackId, 'Reanudando en cola');
+    await enviarTexto('▶️ Reanudando todas en cola cada 45 segundos.', chatId);
     return;
   }
 
@@ -666,6 +1037,12 @@ async function procesarCallback(q) {
     return;
   }
 
+  if (accion === 'album') {
+    await responderCallback(callbackId, 'Enviando álbum completo...');
+    await enviarAlbumCompleto(id);
+    return;
+  }
+
   if (accion === 'reiniciar') {
     const ok = cambiarEstadoPerfil(id, 'ACTIVA');
     await responderCallback(callbackId, ok ? 'Bot reiniciado' : 'No encontrado');
@@ -673,18 +1050,6 @@ async function procesarCallback(q) {
       await enviarTexto(`🔄 Perfil ${id} reiniciado y puesto en ACTIVA.`, chatId);
       await enviarEstadoPerfil(id);
     }
-    return;
-  }
-
-  if (accion === 'fotos3') {
-    await responderCallback(callbackId, 'Enviando 3 fotos...');
-    await enviarUltimasFotos(id, 3);
-    return;
-  }
-
-  if (accion === 'fotos4') {
-    await responderCallback(callbackId, 'Enviando 4 fotos...');
-    await enviarUltimasFotos(id, 4);
     return;
   }
 
@@ -838,7 +1203,7 @@ app.get('/', (req, res) => {
     </style>
   </head>
   <body>
-    <h1>🔥 jean carlos BOT 🔥</h1>
+    <h1>🔥 PANEL PRO 🔥</h1>
     <div style="margin-bottom:16px;">
       <button class="danger" onclick="accionGlobal('pausar_todas')">⏸ Pausar todas</button>
       <button class="success" onclick="accionGlobal('reanudar_todas')">▶️ Reanudar todas</button>
@@ -856,9 +1221,10 @@ app.get('/', (req, res) => {
         <div class="row"><strong>${p.nombre}</strong></div>
         <div class="row">🆔 Perfil: ${id}</div>
         <div class="row">💬 Chat ID: ${p.chat_id || 'N/A'}</div>
-        <div class="row">📞 ${p.telefono}</div>
-        <div class="row">🆔 Código: ${p.codigo}</div>
-        <div class="row">📍 ${p.ubicacion}</div>
+        <div class="row">🔑 Cliente token: ${p.cliente_token || 'SIN CLAVE'}</div>
+        <div class="row">📞 ${p.telefono || 'N/A'}</div>
+        <div class="row">🆔 Código: ${p.codigo || 'N/A'}</div>
+        <div class="row">📍 ${p.ubicacion || 'N/A'}</div>
         <div class="row estado">🟢 ${p.estado}</div>
         <div class="row">🕒 ${p.ultima_hora}</div>
         <div class="row">⏱ Próximo bump: ${p.proximo_post_ts ? tiempoRestante(p.proximo_post_ts) : (p.proximo_post || 'N/A')}</div>
@@ -870,6 +1236,7 @@ app.get('/', (req, res) => {
 
         <button class="danger" onclick="accionPerfil('${id}','pausar')">⏸ Pausar</button>
         <button class="success" onclick="accionPerfil('${id}','reanudar')">▶️ Reanudar</button>
+        <button class="warning" onclick="accionPerfil('${id}','resetacceso')">🔐 Resetear acceso</button>
         <button class="muted" onclick="accionPerfil('${id}','progpausa')">⏰ Programar pausa</button>
         <button class="muted" onclick="accionPerfil('${id}','progreanudar')">⏰ Programar reanudar</button>
         <button class="info" onclick="accionPerfil('${id}','ultima')">🕒 Último bump</button>
@@ -883,7 +1250,16 @@ app.get('/', (req, res) => {
   html += `
     </div>
     <script>
+      setInterval(() => {
+        location.reload();
+      }, 10000);
+
       async function accionPerfil(id, accion) {
+        if (accion === 'resetacceso') {
+          const ok = confirm('¿Seguro que quieres resetear este perfil? Se borrarán fotos, datos viejos, contadores y la clave vieja dejará de funcionar.');
+          if (!ok) return;
+        }
+
         await fetch('/accion', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -937,6 +1313,9 @@ app.get('/nuevo', (req, res) => {
 
         <label>Chat ID</label>
         <input name="chat_id" />
+
+        <label>Cliente token / Clave de acceso</label>
+        <input name="cliente_token" />
 
         <label>Teléfono</label>
         <input name="telefono" />
@@ -1015,6 +1394,9 @@ app.get('/editar/:id', (req, res) => {
         <label>Chat ID</label>
         <input name="chat_id" value="${p.chat_id || ''}" />
 
+        <label>Cliente token / Clave de acceso</label>
+        <input name="cliente_token" value="${p.cliente_token || ''}" />
+
         <label>Teléfono</label>
         <input name="telefono" value="${p.telefono || ''}" />
 
@@ -1060,6 +1442,7 @@ app.post('/guardar-perfil', (req, res) => {
     id,
     nombre,
     chat_id,
+    cliente_token,
     telefono,
     codigo,
     ubicacion,
@@ -1080,13 +1463,14 @@ app.post('/guardar-perfil', (req, res) => {
 
   data[id].nombre = nombre || `Perfil ${id}`;
   data[id].chat_id = chat_id || '';
+  data[id].cliente_token = cliente_token || '';
   data[id].telefono = telefono || '';
   data[id].codigo = codigo || '';
   data[id].ubicacion = ubicacion || '';
   data[id].texto = texto || '';
   data[id].estado = estado || 'ACTIVA';
-  data[id].foto_modelo = foto_modelo || 'https://picsum.photos/400/260';
-  data[id].foto_pagina = foto_pagina || 'https://picsum.photos/420/280';
+  data[id].foto_modelo = foto_modelo || data[id].foto_modelo || 'https://picsum.photos/400/260';
+  data[id].foto_pagina = foto_pagina || data[id].foto_pagina || 'https://picsum.photos/420/280';
   data[id].proximo_post = proximo_post || '16m';
   data[id].fin_plan = convertirFinPlan(fin_plan || '7 días');
   data[id].ultima_hora = horaActual();
@@ -1119,6 +1503,12 @@ app.post('/accion', async (req, res) => {
   } else if (accion === 'reanudar') {
     cambiarEstadoPerfil(id, 'ACTIVA');
     await enviarEstadoPerfil(id);
+  } else if (accion === 'resetacceso') {
+    const nuevoToken = resetearAccesoPerfil(id);
+
+    if (nuevoToken) {
+      await enviarTexto(`🔐 Acceso reseteado y perfil limpiado\nPerfil: ${id}\nNueva clave: ${nuevoToken}\nEstado: PAUSADA`);
+    }
   } else if (accion === 'progpausa') {
     programarAccion(id, 'PAUSADA', 30);
     await enviarTexto(`⏰ Se programó una pausa para ${data[id].nombre} en 30 minutos.`);
@@ -1142,11 +1532,12 @@ app.post('/accion-global', async (req, res) => {
   const { accion } = req.body;
 
   if (accion === 'pausar_todas') {
+    cancelarColaReanudacion();
     cambiarEstadoTodos('PAUSADA');
-    await enviarTexto('⏸ Todas las páginas quedaron en PAUSADA.');
+    await enviarTexto('⏸ Todas las páginas quedaron en PAUSADA. Cola cancelada.');
   } else if (accion === 'reanudar_todas') {
-    cambiarEstadoTodos('ACTIVA');
-    await enviarTexto('▶️ Todas las páginas quedaron en ACTIVA.');
+    reanudarTodasEnCola();
+    await enviarTexto('▶️ Reanudando todas en cola cada 45 segundos.');
   }
 
   res.redirect('/');
@@ -1155,6 +1546,46 @@ app.post('/accion-global', async (req, res) => {
 // =========================
 // CICLO SEGURO
 // =========================
+async function procesarColaReanudacion(versionActiva) {
+  if (versionActiva !== colaVersion) return;
+
+  if (!colaReanudacion || colaReanudacion.length === 0) {
+    cancelarColaReanudacion();
+    return;
+  }
+
+  const id = colaReanudacion.shift();
+
+  if (versionActiva !== colaVersion) return;
+
+  cambiarEstadoPerfil(id, 'ACTIVA');
+  await enviarTexto(`▶️ Perfil ${id} reanudado automáticamente en cola.`);
+  await enviarEstadoPerfil(id);
+
+  if (versionActiva !== colaVersion) return;
+
+  if (colaReanudacion && colaReanudacion.length > 0) {
+    colaTimeout = setTimeout(() => {
+      procesarColaReanudacion(versionActiva);
+    }, 45000);
+  } else {
+    cancelarColaReanudacion();
+  }
+}
+
+function reanudarTodasEnCola() {
+  cancelarColaReanudacion();
+
+  const data = leerData();
+  colaReanudacion = Object.keys(data);
+
+  const versionActiva = colaVersion;
+
+  if (colaReanudacion.length > 0) {
+    procesarColaReanudacion(versionActiva);
+  }
+}
+
 async function cicloPrincipal() {
   if (cicloEnProceso) {
     setTimeout(cicloPrincipal, 3003);
@@ -1195,3 +1626,4 @@ app.listen(PORT, async () => {
   await apiTelegram('deleteWebhook', {});
   cicloPrincipal();
 });
+     
