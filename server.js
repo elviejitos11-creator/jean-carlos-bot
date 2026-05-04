@@ -21,7 +21,7 @@ app.use((req, res, next) => {
   next();
 });
 
-const PORT = 3000;
+const PORT = 3003;
 
 // CAMBIA ESTAS 4 COSAS
 const BOT_TOKEN = '8670917706:AAEp7uHCGx3FhHdMMw_tMQJWyOiTVGTHHKU';
@@ -1650,7 +1650,7 @@ function reanudarTodasEnCola() {
 
 async function cicloPrincipal() {
   if (cicloEnProceso) {
-    setTimeout(cicloPrincipal, 3000);
+    setTimeout(cicloPrincipal, 3003);
     return;
   }
 
@@ -1663,7 +1663,7 @@ async function cicloPrincipal() {
     console.log('Error en cicloPrincipal:', error?.message || error);
   } finally {
     cicloEnProceso = false;
-    setTimeout(cicloPrincipal, 3000);
+    setTimeout(cicloPrincipal, 3003);
   }
 }
 
