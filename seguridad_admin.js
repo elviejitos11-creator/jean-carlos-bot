@@ -8,7 +8,9 @@ const archivo = path.join(__dirname, 'admin_auth.json');
 const DURACION = 8 * 60 * 60 * 1000;
 
 function comprobar(usuario, clave) {
-  const cuenta = JSON.parse(fs.readFileSync(archivo, 'utf8'));
+  const cuenta = JSON.parse((process.env.CQ_ADMIN_AUTH_B64
+ ? Buffer.from(process.env.CQ_ADMIN_AUTH_B64, 'base64').toString('utf8')
+ : fs.readFileSync(archivo, 'utf8')));
 
   if (usuario !== cuenta.usuario) return false;
 
