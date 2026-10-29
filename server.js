@@ -1503,7 +1503,7 @@ app.post('/admin/panel/:cid/guardar-perfil',
       const eraNuevo = !Object.prototype.hasOwnProperty.call(
         propietarios, id);
 
-      const copiaMapa = require('fs').readFileSync(mapaRuta);
+      const copiaMapa = require('fs').existsSync(mapaRuta) ? require('fs').readFileSync(mapaRuta) : Buffer.from('{}');
 
       if (eraNuevo) {
         cfg.propietarios = cfg.propietarios || {};
