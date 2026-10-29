@@ -1435,9 +1435,21 @@ function cqAutorizarPanel(req, res, next) {
 }
 
 function cqPropietarios() {
+  const io = require('fs');
   const ruta = require('path').join(__dirname,
     'clientes_data', 'cq_propietarios_perfiles.json');
-  return JSON.parse(require('fs').readFileSync(ruta, 'utf8'));
+
+  if (!io.existsSync(ruta)) {
+    io.mkdirSync(require('path').dirname(ruta), {
+      recursive: true
+    });
+    io.writeFileSync(ruta, JSON.stringify({
+      propietarios: {},
+      ocultarEnPrincipal: {}
+    }, null, 2), 'utf8');
+  }
+
+  return JSON.parse(io.readFileSync(ruta, 'utf8'));
 }
 
 function cqHandler(method, ruta) {
