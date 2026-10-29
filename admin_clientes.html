@@ -90,7 +90,34 @@ async function cargar(){
         panel.title='Pendiente de conectar al PANEL PRO original';
         div.append(panel);
 
-        const eliminar=document.createElement('button');
+                 const editar=document.createElement('button');
+         editar.textContent='✏️ Editar';
+         editar.type='button';
+         editar.style.margin='0 6px';
+         editar.onclick=async()=>{
+           const nombre=prompt('Nombre',c.nombre);
+           if(nombre===null)return;
+           const usuario=prompt('Usuario',c.usuario);
+           if(usuario===null)return;
+           const clave=prompt('Nueva contraseña (dejar vacío para conservarla)','');
+           if(clave===null)return;
+           const vencimiento=prompt(
+             'Vencimiento AAAA-MM-DD o +30 para agregar 30 días',
+             c.vencimiento.slice(0,10));
+           if(vencimiento===null)return;
+           const limite=prompt('Límite de perfiles',String(c.limite));
+           if(limite===null)return;
+           try {
+             const x=await peticion('/admin/api/editar',{
+               id:c.id,nombre,usuario,clave,vencimiento,limite
+             });
+             if(!x.ok)throw Error(x.error||'Error al editar');
+             alert('Cliente actualizado');
+             await cargar();
+           }catch(e){alert(e.message);}
+         };
+         div.append(editar);
+         const eliminar=document.createElement('button');
         eliminar.textContent='Eliminar';
         eliminar.className='danger';
         eliminar.disabled=false;

@@ -114,8 +114,65 @@ function revocarCliente(id) {
   return true;
 }
 
+function editarCliente(id, cambios) {
+  const clientes = listar();
+  const c = clientes.find(x => x.id === id);
+  if (!c) throw Error('Cliente inexistente');
+
+  const nombre = String(cambios.nombre || '').trim();
+  const usuario = String(cambios.usuario || '').trim().toLowerCase();
+  const clave = String(cambios.clave || '');
+  const limite = Number(cambios.limite);
+  const fecha = String(cambios.vencimiento || '').trim();
+
+  if (!nombre || !/^[a-z0-9_-]{3,40}$/.test(usuario))
+    throw Error('Nombre o usuario invalido');
+
+  if (clientes.some(x => x.id !== id && x.usuario === usuario))
+    throw Error('Ese usuario ya existe');
+
+  if (!Number.isInteger(limite) || limite < 1 || limite > 100)
+    throw Error('Limite de perfiles invalido');
+
+  if (clave && clave.length < 12)
+    throw Error('La nueva contraseña requiere 12 caracteres');
+
+  let vencimiento;
+
+  if (/^\+[0-9]{1,4}$/.test(fecha)) {
+    const dias = Number(fecha.slice(1));
+    if (dias < 1 || dias > 3650) throw Error('Dias invalidos');
+    const base = Math.max(Date.now(), Date.parse(c.vencimiento));
+    vencimiento = new Date(base + dias * 86400000).toISOString();
+  } else {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha))
+      throw Error('Fecha invalida');
+
+    const d = new Date(fecha + 'T23:59:59.000Z');
+    if (!Number.isFinite(d.getTime()) || d.toISOString().slice(0,10) !== fecha)
+      throw Error('Fecha invalida');
+
+    vencimiento = d.toISOString();
+  }
+
+  c.nombre = nombre;
+  c.usuario = usuario;
+  c.limite = limite;
+  c.vencimiento = vencimiento;
+
+  if (clave) c.claveHash = hashClave(clave, c.salt);
+
+  guardar(REGISTRO, clientes);
+
+  return {
+    id:c.id, nombre:c.nombre, usuario:c.usuario,
+    limite:c.limite, vencimiento:c.vencimiento,
+    activo:c.activo
+  };
+}
 module.exports = {
   crearCliente,
+  editarCliente,
   autenticar,
   revocarCliente,
   listar,

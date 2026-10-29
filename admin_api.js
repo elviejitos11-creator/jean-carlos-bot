@@ -30,6 +30,25 @@ module.exports = function(app) {
     }
   });
 
+  app.post('/admin/api/editar', (req,res) => {
+    try {
+      if (req.admin !== true)
+        return res.status(403).json({ok:false,error:'Administrador requerido'});
+
+      const origen = req.get('origin');
+      const esperado = (req.get('x-forwarded-proto') || req.protocol)
+        + '://' + req.get('host');
+
+      if (origen && origen !== esperado)
+        return res.status(403).json({ok:false,error:'Origen no permitido'});
+
+      const id = String(req.body?.id || '');
+      const cliente = store.editarCliente(id, req.body || {});
+      return res.json({ok:true,cliente});
+    } catch(e) {
+      return res.status(400).json({ok:false,error:e.message});
+    }
+  });
   app.post('/admin/api/suspender', (req,res) => {
     try {
       const id = String(req.body.id || '');
