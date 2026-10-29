@@ -69,7 +69,7 @@ function clienteActual(req) {
   if (!s || s.hasta <= Date.now()) return null;
 
   const c = store.listar().find(x=>x.id===s.id);
-  if (!c || !c.activo || Date.parse(c.vencimiento)<=Date.now()) {
+  if (!c || !c.activo || Date.parse(c.vencimiento)<=Date.now() || !s.claveHash || s.claveHash !== c.claveHash) {
     sesiones.delete(token);
     return null;
   }
@@ -78,11 +78,11 @@ function clienteActual(req) {
 
 function exigirSesion(req,res,next) {
   const c = clienteActual(req);
-  if (!c) return res.redirect('/cliente/login');
+  if (!c) return res.redirect('/login');
 
   if (req.method === 'POST') {
     const origen = req.headers.origin;
-    const esperado = req.protocol+'://'+req.get('host');
+    const esperado = (req.get('x-forwarded-proto') || req.protocol)+'://'+req.get('host');
     if (origen && origen !== esperado) return res.sendStatus(403);
     if (req.body._csrf !== sesiones.get(cookie(req)).csrf) {
       return res.sendStatus(403);
@@ -124,6 +124,53 @@ module.exports = function(app) {
       </form></div>`));
   });
 
+  // CQ_LOGIN_UNICO_CLIENTES_V1
+  function iniciarSesionCliente(req,res,c) {
+    const token = crypto.randomBytes(32).toString('hex');
+    const csrf = crypto.randomBytes(24).toString('hex');
+
+    const actual = store.listar().find(x => x.id === c.id);
+    if (!actual || !actual.activo ||
+        Date.parse(actual.vencimiento) <= Date.now()) {
+      return res.status(401).redirect('/login');
+    }
+
+    sesiones.set(token,{
+      id:c.id,
+      csrf,
+      claveHash:actual.claveHash,
+      hasta:Date.now()+8*3600000
+    });
+
+    res.cookie('cq_cliente',token,{
+      httpOnly:true,
+      sameSite:'strict',
+      secure:req.secure || req.get('x-forwarded-proto')==='https',
+      path:'/cliente',
+      maxAge:8*3600000
+    });
+
+    return res.redirect('/cliente');
+  }
+
+  // El mismo formulario admite usuarios de clientes.
+  // Si no es cliente, conserva el login original del administrador.
+  app.post('/login',(req,res,next)=>{
+    let c=null;
+    try {
+      c=store.autenticar(
+        req.body.usuario,
+        req.body.clave
+      );
+    } catch(e) {
+      console.error('[CQ LOGIN CLIENTE]',e.message);
+      return res.status(500).send('Error verificando cuenta');
+    }
+
+    if (!c) return next();
+
+    return iniciarSesionCliente(req,res,c);
+  });
   const fallos = new Map();
 
   app.post('/cliente/login',(req,res)=>{
@@ -154,20 +201,90 @@ module.exports = function(app) {
     }
 
     fallos.delete(ip);
-    const token=crypto.randomBytes(32).toString('hex');
-    const csrf=crypto.randomBytes(24).toString('hex');
-    sesiones.set(token,{
-      id:c.id,csrf,hasta:Date.now()+8*3600000
-    });
-
-    res.cookie('cq_cliente',token,{
-      httpOnly:true,sameSite:'strict',
-      secure:req.secure,path:'/cliente',maxAge:8*3600000
-    });
-    res.redirect('/cliente');
+    return iniciarSesionCliente(req,res,c);
   });
 
   app.use('/cliente',exigirSesion);
+  // CQ_CONTROL_SESIONES_CLIENTES_V1
+  app.get('/cliente/session-check',(req,res)=>{
+    res.setHeader('Cache-Control','no-store');
+    res.json({ok:true});
+  });
+
+  app.get('/cliente/salir',(req,res)=>{
+    const token = cookie(req);
+    if(token) sesiones.delete(token);
+
+    res.clearCookie('cq_cliente',{
+      path:'/cliente'
+    });
+
+    return res.redirect('/login');
+  });
+
+  // Boton de salida y comprobacion automatica en vistas privadas.
+  app.use('/cliente',(req,res,next)=>{
+    if(req.method !== 'GET') return next();
+
+    const enviar = res.send.bind(res);
+
+    res.send = function(html) {
+      if(typeof html !== 'string' ||
+         !/<\/body>/i.test(html) ||
+         html.includes('id="cq-cerrar-sesion-v1"')) {
+        return enviar(html);
+      }
+
+      const controles = `
+      <div id="cq-cerrar-sesion-v1"
+           style="padding:12px;text-align:right">
+        <a href="/cliente/salir"
+           style="display:inline-block;background:#b91c1c;
+                  color:white;padding:12px 18px;
+                  border-radius:9px;text-decoration:none;
+                  font:bold 15px Arial">
+          Cerrar sesión
+        </a>
+      </div>
+      <script>
+      (function(){
+        if(window.__cqSesionActivaV1)return;
+        window.__cqSesionActivaV1=true;
+
+        async function verificarSesion(){
+          try{
+            const r=await fetch('/cliente/session-check',{
+              credentials:'same-origin',
+              cache:'no-store',
+              redirect:'follow'
+            });
+            const tipo=r.headers.get('content-type')||'';
+
+            if(!r.ok || r.redirected ||
+               !tipo.includes('application/json')){
+              window.location.replace('/login');
+              return;
+            }
+
+            const d=await r.json();
+            if(!d.ok)window.location.replace('/login');
+          }catch(e){
+            // Un fallo temporal de red no elimina la sesion.
+          }
+        }
+
+        verificarSesion();
+        setInterval(verificarSesion,10000);
+      })();
+      </script>`;
+
+      return enviar(html.replace(/<body([^>]*)>/i,
+        function(m){return m+controles;}));
+    };
+
+    next();
+  });
+
 
 // CQ_AGENDA_V12_CORREGIDA
 const cqRutaEstadoAgenda12 = "C:\\Users\\yeimy\\OneDrive\\Documents\\ESCRITORIO GUARDADO CQ\\PANEL_PRO3_CLIENTES_DESARROLLO\\clientes_data\\jean_bot_estado.json";
