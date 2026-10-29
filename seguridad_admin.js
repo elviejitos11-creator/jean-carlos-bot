@@ -141,7 +141,7 @@ module.exports = function activarSeguridad(app) {
 
     if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
       const origen = req.headers.origin;
-      const esperado = req.protocol + '://' + req.get('host');
+      const esperado = (req.get('x-forwarded-proto') || req.protocol) + '://' + req.get('host');
       if (origen && origen !== esperado) {
         return res.status(403).json({ ok: false, error: 'Origen no permitido' });
       }

@@ -1,4 +1,4 @@
-﻿const store = require('./clientes_store');
+const store = require('./clientes_store');
 
 module.exports = function(app) {
 
@@ -51,7 +51,7 @@ module.exports = function(app) {
       }
 
       const origen = req.get('origin');
-      if (origen && origen !== req.protocol + '://' + req.get('host')) {
+      if (origen && origen !== (req.get('x-forwarded-proto') || req.protocol) + '://' + req.get('host')) {
         return res.status(403).json({ok:false,error:'Origen no permitido'});
       }
 
