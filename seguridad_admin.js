@@ -118,6 +118,42 @@ module.exports = function activarSeguridad(app) {
 
   app.use((req, res, next) => {
     if (req.path.startsWith('/cliente')) return next();
+    // CQ_CLIENTE_SOLO_SU_PANEL_V2
+    const mCliente = /^\/admin\/panel\/([a-f0-9-]{36})(?:\/(nuevo|guardar-perfil|accion|editar\/[A-Za-z0-9_-]{1,50}))?\/?$/i.exec(req.path);
+
+    if (mCliente) {
+      const operacion = mCliente[2] || '';
+      const permitir =
+        (req.method === 'GET' &&
+          (operacion === '' ||
+           operacion === 'nuevo' ||
+           operacion.startsWith('editar/'))) ||
+        (req.method === 'POST' &&
+          (operacion === 'guardar-perfil' ||
+           operacion === 'accion'));
+
+      if (permitir) {
+        const obtenerCliente = app.locals.cqClienteActual;
+        const c = typeof obtenerCliente === 'function'
+          ? obtenerCliente(req) : null;
+
+        if (c && c.id.toLowerCase() === mCliente[1].toLowerCase()) {
+          if (req.method === 'POST') {
+            const origen = req.get('origin');
+            const esperado =
+              (req.get('x-forwarded-proto') || req.protocol) +
+              '://' + req.get('host');
+
+            if (!origen || origen !== esperado) {
+              return res.sendStatus(403);
+            }
+          }
+
+          req.cliente = c;
+          return next();
+        }
+      }
+    }
         // CQ_REPARACION_API_ORIGINAL_3003
         // Conservar las rutas originales utilizadas por el script.
         if (

@@ -1410,6 +1410,42 @@ function cqPantallaCompartida(req, res) {
     );
   }
 
+  // CQ_LOGIN_PANEL_CORRECTO_V2
+  if (req.cliente && req.cqClienteSeleccionado === req.cliente.id) {
+    const bloque = `<div style="padding:12px 16px;text-align:right">
+      <a href="/cliente/salir"
+         style="display:inline-block;background:#b32626;color:white;
+                padding:12px 18px;text-decoration:none;
+                border-radius:9px;font-weight:bold">
+        Cerrar sesión
+      </a>
+    </div>
+    <script>
+    (function(){
+      async function comprobar(){
+        try {
+          const r = await fetch('/cliente/session-check',{
+            credentials:'same-origin',
+            redirect:'follow',
+            cache:'no-store'
+          });
+          if (!r.ok || r.redirected ||
+              !(r.headers.get('content-type')||'').includes('application/json')) {
+            location.replace('/login');
+            return;
+          }
+          const d = await r.json();
+          if (!d.ok) location.replace('/login');
+        } catch(e) {}
+      }
+      comprobar();
+      setInterval(comprobar,10000);
+    })();
+    </script>`;
+
+    html = html.replace(/<body([^>]*)>/i, m => m + bloque);
+  }
+
   res.send(html);
 }
 
@@ -1417,9 +1453,11 @@ app.get('/', cqPantallaCompartida);
 
 // CQ_PANEL_ADMIN_COMPARTIDO_V2
 function cqAutorizarPanel(req, res, next) {
-  if (req.admin !== true) return res.sendStatus(403);
-
   const cid = String(req.params.cid || '');
+  if (req.admin !== true &&
+      (!req.cliente || req.cliente.id !== cid)) {
+    return res.sendStatus(403);
+  }
 
   if (!/^[a-f0-9-]{36}$/i.test(cid)) {
     return res.sendStatus(400);

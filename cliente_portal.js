@@ -112,6 +112,7 @@ async function cqNotificarClienteTelegram(perfil, cliente, accion) {
 /* CQ_TELEGRAM_CLIENTES_V1 - FIN */
 
 module.exports = function(app) {
+  app.locals.cqClienteActual = clienteActual;
   app.get('/cliente/login',(req,res)=>{
     res.send(pagina('Acceso clientes',`
       <div class="card">
@@ -146,13 +147,12 @@ module.exports = function(app) {
       httpOnly:true,
       sameSite:'strict',
       secure:req.secure || req.get('x-forwarded-proto')==='https',
-      path:'/cliente',
+      path:'/',
       maxAge:8*3600000
     });
 
-    return res.redirect('/cliente');
+    return res.redirect('/admin/panel/' + encodeURIComponent(c.id));
   }
-
   // El mismo formulario admite usuarios de clientes.
   // Si no es cliente, conserva el login original del administrador.
   app.post('/login',(req,res,next)=>{
@@ -215,10 +215,8 @@ module.exports = function(app) {
     const token = cookie(req);
     if(token) sesiones.delete(token);
 
-    res.clearCookie('cq_cliente',{
-      path:'/cliente'
-    });
-
+    res.clearCookie('cq_cliente',{path:'/'});
+    res.clearCookie('cq_cliente',{path:'/cliente'});
     return res.redirect('/login');
   });
 
