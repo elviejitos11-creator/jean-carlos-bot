@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PANEL PRO - Administración</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;padding:22px;background:linear-gradient(135deg,#07172e,#20103c);color:white;font-family:Arial,sans-serif}
+main{max-width:980px;margin:auto}
+h1{font-size:27px}
+p{color:#b8c3dc}
+.card{background:#122642;padding:22px;border:1px solid #35466b;border-radius:16px;margin:18px 0}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+label{display:block;margin:10px 0;font-weight:bold}
+input{width:100%;padding:13px;margin-top:7px;background:#071427;color:white;border:1px solid #465477;border-radius:9px;font-size:15px}
+button,.btn{display:inline-block;border:0;border-radius:9px;padding:12px 17px;background:linear-gradient(90deg,#087cff,#a618df);color:white;font-weight:bold;cursor:pointer;text-decoration:none}
+.danger{background:#c62828}
+.cliente{background:#0a1a30;border-radius:10px;padding:15px;margin-top:10px;overflow-wrap:anywhere}
+small{color:#b7c8e5}
+#mensaje{font-weight:bold}
+</style>
+</head>
+<body>
+<main>
+<a class="btn" href="/">⬅ Volver a mi trabajo</a>
+<h1>🔥 PANEL PRO — Administración</h1>
+<p>Crear y controlar clientes desde tu mismo panel.</p>
+<div class="card">
+<h2>➕ Crear cliente</h2>
+<form id="formulario">
+<div class="grid">
+<label>Nombre<input name="nombre" required></label>
+<label>Usuario<input name="usuario" minlength="3" required></label>
+<label>Contraseña del cliente<input name="clave" type="password" minlength="12" autocomplete="new-password" required></label>
+<label>Días de licencia<input name="dias" type="number" min="1" max="3650" value="30" required></label>
+<label>Límite de perfiles<input name="limite" type="number" min="1" max="100" value="20" required></label>
+</div>
+<button type="submit">➕ Crear cliente</button>
+</form>
+<p id="mensaje" role="status"></p>
+</div>
+<div class="card">
+<h2>👥 Clientes registrados</h2>
+<div id="listado">Cargando...</div>
+</div>
+</main>
+<script>
+const listado=document.getElementById('listado');
+const mensaje=document.getElementById('mensaje');
+const formulario=document.getElementById('formulario');
+
+async function peticion(url,datos){
+ const opciones=datos?{
+  method:'POST',
+  headers:{'Content-Type':'application/json'},
+  body:JSON.stringify(datos)
+ }:{};
+ const r=await fetch(url,opciones);
+ if(r.status===401){location.href='/login';throw Error('Sesión vencida');}
+ return await r.json();
+}
+
+async function cargar(){
+ try{
+  const r=await peticion('/admin/api/clientes');
+  if(!r.ok)throw Error('No se pudieron cargar clientes');
+  listado.replaceChildren();
+  if(!r.clientes.length){listado.textContent='Todavía no hay clientes';return;}
+  for(const c of r.clientes){
+   const div=document.createElement('div');
+   div.className='cliente';
+   const titulo=document.createElement('strong');
+   titulo.textContent=c.nombre+' — '+c.usuario;
+   const detalle=document.createElement('p');
+   detalle.textContent='Estado: '+(c.activo?'ACTIVO':'SUSPENDIDO')+
+     ' | Vence: '+new Date(c.vencimiento).toLocaleString()+
+     ' | Perfiles permitidos: '+c.limite;
+   div.append(titulo,detalle);
+           // CQ_BOTONES_PANEL_ELIMINAR_V1
+        const panel=document.createElement('button');
+        panel.textContent='Panel';
+        panel.className='success';
+        panel.disabled=false;
+        panel.title='Abrir el PANEL PRO original';
+        panel.onclick=()=>{
+          window.location.href='/admin/panel/' +
+            encodeURIComponent(c.id);
+        };
+        panel.title='Pendiente de conectar al PANEL PRO original';
+        div.append(panel);
+
+        const eliminar=document.createElement('button');
+        eliminar.textContent='Eliminar';
+        eliminar.className='danger';
+        eliminar.disabled=false;
+        eliminar.title='Eliminar cliente con respaldo';
+        eliminar.onclick=async()=>{
+          if(!confirm('Eliminar este cliente y retirar su acceso?')) return;
+          if(!confirm('Confirmar eliminacion de '+c.nombre+'?')) return;
+          try {
+            const r=await fetch('/admin/api/eliminar',{
+              method:'POST',
+              headers:{'Content-Type':'application/json'},
+              body:JSON.stringify({id:c.id})
+            });
+            const x=await r.json();
+            if(!r.ok || !x.ok) throw Error(x.error || 'Error');
+            location.reload();
+          }catch(e){ alert(e.message); }
+        };
+        eliminar.title='Pendiente de habilitar eliminacion segura';
+        div.append(eliminar);
+   listado.append(div);
+  }
+ }catch(e){listado.textContent=e.message;}
+}
+
+formulario.onsubmit=async(e)=>{
+ e.preventDefault();
+ const boton=formulario.querySelector('button');
+ boton.disabled=true;
+ try{
+  const datos=Object.fromEntries(new FormData(formulario));
+  const r=await peticion('/admin/api/crear',datos);
+  mensaje.textContent=r.ok?'Cliente registrado correctamente':r.error;
+  if(r.ok){formulario.reset();await cargar();}
+ }catch(e){mensaje.textContent=e.message;}
+ finally{boton.disabled=false;}
+};
+cargar();
+</script>
+</body>
+</html>

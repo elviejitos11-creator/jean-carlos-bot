@@ -21,10 +21,28 @@ app.use((req, res, next) => {
   next();
 });
 
-const PORT = 3003;
+
+
+
+
+require('./cq_jean_cliente_v7')(app); // CQ_JEAN_CLIENTE_V7
+require('./cliente_portal')(app);
+require('./cq_agenda_cliente')(app); // CQ_AGENDA_CLIENTE_V10_CORREGIDA
+require('./cliente_api')(app, {
+  enviarTexto,
+  enviarConBotonesCliente: (texto, chatId, cliente, id) =>
+    apiTelegram('sendMessage', {
+      chat_id: chatId,
+      text: texto,
+      reply_markup: require('./cliente_botones').botones(cliente, id)
+    })
+});
+require('./seguridad_admin')(app);
+require('./admin_api')(app);
+const PORT = Number(process.env.PORT || 3003);
 
 // CAMBIA ESTAS 4 COSAS
-const BOT_TOKEN = '8670917706:AAEp7uHCGx3FhHdMMw_tMQJWyOiTVGTHHKU';
+const BOT_TOKEN = process.env.BOT_TOKEN || "";
 const CHAT_ID = '';
 const SUPPORT_URL = 'https://t.me/tu_soporte';
 const RULES_TEXT = `📜 Reglas del sistema
@@ -1011,6 +1029,7 @@ app.post('/registrar-evento', async (req, res) => {
 // TELEGRAM CALLBACKS
 // =========================
 async function procesarCallback(q) {
+  if (await require('./cliente_botones').manejar(q,apiTelegram)) return;
   const data = q.data || '';
   const callbackId = q.id;
   const chatId = q.message?.chat?.id || CHAT_ID;
@@ -1216,8 +1235,42 @@ async function ejecutarProgramaciones() {
 // =========================
 // PANEL WEB
 // =========================
-app.get('/', (req, res) => {
-  const data = leerData();
+function cqPantallaCompartida(req, res) {
+  const todos = leerData();
+  const data = {};
+
+  if (req.cqClienteSeleccionado) {
+    const cfg = JSON.parse(require('fs').readFileSync(
+      require('path').join(__dirname, 'clientes_data',
+        'cq_propietarios_perfiles.json'), 'utf8'));
+
+    for (const id of Object.keys(todos)) {
+      if ((cfg.propietarios || {})[id] ===
+          req.cqClienteSeleccionado) {
+        data[id] = todos[id];
+      }
+    }
+  } else {
+    // CQ_SEPARACION_SEGURA_V2
+    const cfgPrincipal = JSON.parse(
+      require('fs').readFileSync(
+        require('path').join(
+          __dirname,
+          'clientes_data',
+          'cq_propietarios_perfiles.json'
+        ),
+        'utf8'
+      )
+    );
+
+    const ocultos = cfgPrincipal.ocultarEnPrincipal || {};
+
+    for (const id of Object.keys(todos)) {
+      if (!Object.prototype.hasOwnProperty.call(ocultos, id)) {
+        data[id] = todos[id];
+      }
+    }
+  }
   let html = `
   <html>
   <head>
@@ -1253,6 +1306,7 @@ app.get('/', (req, res) => {
       <button class="danger" onclick="accionGlobal('pausar_todas')">⏸ Pausar todas</button>
       <button class="success" onclick="accionGlobal('reanudar_todas')">▶️ Reanudar todas</button>
       <a class="btn warning" href="/nuevo">➕ Nuevo perfil</a>
+      <a class="btn info" href="/administracion">⚙️ Administrar clientes</a>
     </div>
     <div class="grid">
   `;
@@ -1335,8 +1389,213 @@ app.get('/', (req, res) => {
   </html>
   `;
 
+  if (req.cqClienteSeleccionado) {
+    const pref = '/admin/panel/' +
+      encodeURIComponent(req.cqClienteSeleccionado);
+
+    // Misma pantalla y tarjetas originales.
+    html = html.replace(
+      /<button[^>]+onclick="accionGlobal\([^"]+"[^>]*>[^<]*<\/button>/g,
+      ''
+    );
+
+    html = html.replace('href="/nuevo"',
+      'href="' + pref + '/nuevo"');
+
+    html = html.replace('href="/administracion"',
+      'href="/administracion"');
+
+    html = html.replace(/href="\/editar\//g,
+      'href="' + pref + '/editar/');
+
+    html = html.replaceAll("fetch('/accion'",
+      "fetch('" + pref + "/accion'");
+  }
+
+  if (req.cqClienteSeleccionado) {
+    html = html.replace(
+      /<a\b[^>]*href=["']\/administracion["'][^>]*>[\s\S]*?<\/a>/gi,
+      ''
+    );
+  }
+
   res.send(html);
-});
+}
+
+app.get('/', cqPantallaCompartida);
+
+// CQ_PANEL_ADMIN_COMPARTIDO_V2
+function cqAutorizarPanel(req, res, next) {
+  if (req.admin !== true) return res.sendStatus(403);
+
+  const cid = String(req.params.cid || '');
+
+  if (!/^[a-f0-9-]{36}$/i.test(cid)) {
+    return res.sendStatus(400);
+  }
+
+  const cliente = require('./clientes_store')
+    .listar().find(c => c.id === cid);
+
+  if (!cliente) return res.sendStatus(404);
+
+  req.cqClienteSeleccionado = cid;
+  next();
+}
+
+function cqPropietarios() {
+  const ruta = require('path').join(__dirname,
+    'clientes_data', 'cq_propietarios_perfiles.json');
+  return JSON.parse(require('fs').readFileSync(ruta, 'utf8'));
+}
+
+function cqHandler(method, ruta) {
+  const stack =
+    (app.router && app.router.stack) ||
+    (app._router && app._router.stack) || [];
+
+  const match = stack.find(layer =>
+    layer.route &&
+    layer.route.path === ruta &&
+    layer.route.methods[method]
+  );
+
+  if (!match) throw Error('No existe ruta original: ' + ruta);
+  return match.route.stack[0].handle;
+}
+
+app.get('/admin/panel/:cid',
+  cqAutorizarPanel, cqPantallaCompartida);
+
+app.get('/admin/panel/:cid/nuevo',
+  cqAutorizarPanel, (req, res, next) => {
+    try {
+      const pref = '/admin/panel/' +
+        encodeURIComponent(req.cqClienteSeleccionado);
+
+      const enviar = res.send.bind(res);
+      res.send = html => enviar(String(html)
+        .replace('action="/guardar-perfil"',
+          'action="' + pref + '/guardar-perfil"')
+        .replace('href="/"', 'href="' + pref + '"'));
+
+      cqHandler('get', '/nuevo')(req, res, next);
+    } catch(e) { next(e); }
+  });
+
+app.post('/admin/panel/:cid/guardar-perfil',
+  cqAutorizarPanel, (req, res, next) => {
+    try {
+      const id = String(req.body.id || '');
+
+      if (!/^[a-zA-Z0-9_-]{1,50}$/.test(id)) {
+        return res.status(400).send('ID invalido');
+      }
+
+      const cfg = cqPropietarios();
+      const propietarios = cfg.propietarios || {};
+      const original = leerData();
+
+      if (Object.prototype.hasOwnProperty.call(original, id) &&
+          propietarios[id] !== req.cqClienteSeleccionado) {
+        return res.status(409).send('Este ID ya existe');
+      }
+
+      if (propietarios[id] &&
+          propietarios[id] !== req.cqClienteSeleccionado) {
+        return res.status(409).send('ID asignado a otro cliente');
+      }
+
+      const mapaRuta = require('path').join(__dirname,
+        'clientes_data', 'cq_propietarios_perfiles.json');
+
+      const eraNuevo = !Object.prototype.hasOwnProperty.call(
+        propietarios, id);
+
+      const copiaMapa = require('fs').readFileSync(mapaRuta);
+
+      if (eraNuevo) {
+        cfg.propietarios = cfg.propietarios || {};
+        cfg.propietarios[id] = req.cqClienteSeleccionado;
+        cfg.ocultarEnPrincipal =
+          cfg.ocultarEnPrincipal || {};
+        cfg.ocultarEnPrincipal[id] =
+          req.cqClienteSeleccionado;
+
+        const tmp = mapaRuta + '.cq_nuevo_tmp';
+        require('fs').writeFileSync(tmp,
+          JSON.stringify(cfg, null, 2));
+        require('fs').renameSync(tmp, mapaRuta);
+      }
+
+      const anteriorRedirect = res.redirect.bind(res);
+      const pref = '/admin/panel/' +
+        encodeURIComponent(req.cqClienteSeleccionado);
+
+      res.redirect = () => anteriorRedirect(pref);
+
+      try {
+        cqHandler('post', '/guardar-perfil')(req, res, next);
+      } catch (error) {
+        if (eraNuevo) {
+          require('fs').writeFileSync(mapaRuta, copiaMapa);
+        }
+        throw error;
+      }
+    } catch(e) { next(e); }
+  });
+
+app.post('/admin/panel/:cid/accion',
+  cqAutorizarPanel, (req, res, next) => {
+    try {
+      const id = String(req.body.id || '');
+      const cfg = cqPropietarios();
+
+      if ((cfg.propietarios || {})[id] !==
+          req.cqClienteSeleccionado) {
+        return res.sendStatus(403);
+      }
+
+      // No permitir borrar desde esta integracion inicial.
+      if (req.body.accion === 'borrarperfil') {
+        return res.status(403).send(
+          'Borrado pendiente de control seguro');
+      }
+
+      const pref = '/admin/panel/' +
+        encodeURIComponent(req.cqClienteSeleccionado);
+
+      const redirigir = res.redirect.bind(res);
+      res.redirect = () => redirigir(pref);
+
+      return Promise.resolve(
+        cqHandler('post', '/accion')(req, res, next)
+      ).catch(next);
+    } catch(e) { next(e); }
+  });
+
+app.get('/admin/panel/:cid/editar/:id',
+  cqAutorizarPanel, (req, res, next) => {
+    try {
+      const cfg = cqPropietarios();
+
+      if ((cfg.propietarios || {})[req.params.id] !==
+          req.cqClienteSeleccionado) {
+        return res.sendStatus(403);
+      }
+
+      const pref = '/admin/panel/' +
+        encodeURIComponent(req.cqClienteSeleccionado);
+
+      const enviar = res.send.bind(res);
+      res.send = html => enviar(String(html)
+        .replace('action="/guardar-perfil"',
+          'action="' + pref + '/guardar-perfil"')
+        .replace('href="/"', 'href="' + pref + '"'));
+
+      cqHandler('get', '/editar/:id')(req, res, next);
+    } catch(e) { next(e); }
+  });
 
 // FORM NUEVO PERFIL
 app.get('/nuevo', (req, res) => {
@@ -1685,7 +1944,14 @@ app.listen(PORT, async () => {
     });
   }
 
-  await apiTelegram('deleteWebhook', {});
-  cicloPrincipal();
+  // Telegram desactivado durante el desarrollo
+  // Ciclo Telegram desactivado durante el desarrollo
 });
      
+app.get('/administracion', (req, res) => {
+  res.sendFile(path.join(__dirname, 'admin_clientes.html'));
+});
+
+
+// JEAN_BOT_CLIENTE_INTEGRACION_V1
+require('./jean_bot_cliente').iniciar(BOT_TOKEN).catch(e => console.error('[JEAN BOT]',e.message));

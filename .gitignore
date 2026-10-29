@@ -1,0 +1,17 @@
+﻿node_modules/
+.env
+.env.*
+!.env.example
+data.json
+data.*.json
+bot_state.json
+bot_state.*.json
+clientes_data/
+RESPALDO*/
+RESPALDOS*/
+RESCATE*/
+*.bak
+*.log
+*.zip
+
+server_prueba_local.js
