@@ -8,8 +8,8 @@ const archivo = path.join(__dirname, 'admin_auth.json');
 const DURACION = 8 * 60 * 60 * 1000;
 
 function comprobar(usuario, clave) {
-  const cuenta = JSON.parse((process.env.CQ_ADMIN_AUTH_B64
- ? Buffer.from(process.env.CQ_ADMIN_AUTH_B64, 'base64').toString('utf8')
+  const cuenta = JSON.parse(((process.env.CQ_ADMIN_AUTH_B64 || '')
+ ? Buffer.from((process.env.CQ_ADMIN_AUTH_B64 || ''), 'base64').toString('utf8')
  : fs.readFileSync(archivo, 'utf8')));
 
   if (usuario !== cuenta.usuario) return false;
@@ -57,12 +57,12 @@ border:0;border-radius:11px;font-size:16px;font-weight:bold}
 </head>
 <body>
 <div class="panel">
-<h1>🔥 PANEL PRO 🔥</h1>
+<h1>ðŸ”¥ PANEL PRO ðŸ”¥</h1>
 <p>ACCESO PRIVADO</p>
 <form method="POST" action="/login">
 <label>Usuario</label>
 <input name="usuario" autocomplete="username" required>
-<label>Contraseña</label>
+<label>ContraseÃ±a</label>
 <input name="clave" type="password" autocomplete="current-password" required>
 <button type="submit">ENTRAR AL PANEL</button>
 </form>
