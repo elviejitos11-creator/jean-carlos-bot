@@ -57,12 +57,12 @@ border:0;border-radius:11px;font-size:16px;font-weight:bold}
 </head>
 <body>
 <div class="panel">
-<h1>ðŸ”¥ PANEL PRO ðŸ”¥</h1>
+<h1>🔥 PANEL PRO 🔥</h1>
 <p>ACCESO PRIVADO</p>
 <form method="POST" action="/login">
 <label>Usuario</label>
 <input name="usuario" autocomplete="username" required>
-<label>ContraseÃ±a</label>
+<label>Contraseña</label>
 <input name="clave" type="password" autocomplete="current-password" required>
 <button type="submit">ENTRAR AL PANEL</button>
 </form>
