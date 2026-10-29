@@ -1240,9 +1240,7 @@ function cqPantallaCompartida(req, res) {
   const data = {};
 
   if (req.cqClienteSeleccionado) {
-    const cfg = JSON.parse(require('fs').readFileSync(
-      require('path').join(__dirname, 'clientes_data',
-        'cq_propietarios_perfiles.json'), 'utf8'));
+    const cfg = JSON.parse((require('fs').existsSync(require('path').join(__dirname,'clientes_data','cq_propietarios_perfiles.json')) ? require('fs').readFileSync(require('path').join(__dirname,'clientes_data','cq_propietarios_perfiles.json'),'utf8') : '{}'));
 
     for (const id of Object.keys(todos)) {
       if ((cfg.propietarios || {})[id] ===
@@ -1253,14 +1251,7 @@ function cqPantallaCompartida(req, res) {
   } else {
     // CQ_SEPARACION_SEGURA_V2
     const cfgPrincipal = JSON.parse(
-      require('fs').readFileSync(
-        require('path').join(
-          __dirname,
-          'clientes_data',
-          'cq_propietarios_perfiles.json'
-        ),
-        'utf8'
-      )
+      (require('fs').existsSync(require('path').join(__dirname,'clientes_data','cq_propietarios_perfiles.json')) ? require('fs').readFileSync(require('path').join(__dirname,'clientes_data','cq_propietarios_perfiles.json'),'utf8') : '{}')
     );
 
     const ocultos = cfgPrincipal.ocultarEnPrincipal || {};
