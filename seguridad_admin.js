@@ -37,6 +37,8 @@ function paginaLogin(error = '') {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>PANEL PRO - Acceso privado</title>
+<link rel="apple-touch-icon" href="/cq3-postbot.png">
+<link rel="icon" type="image/png" href="/cq3-postbot.png">
 <style>
 *{box-sizing:border-box}
 body{margin:0;min-height:100vh;display:flex;align-items:center;
@@ -57,7 +59,11 @@ border:0;border-radius:11px;font-size:16px;font-weight:bold}
 </head>
 <body>
 <div class="panel">
-<h1>🔥 PANEL PRO 🔥</h1>
+<div style="text-align:center;margin-bottom:18px">
+<img src="/cq3-postbot.png" alt="POSTBOT TELEGRAM"
+style="width:150px;max-width:100%;height:auto;border-radius:22px">
+</div>
+<h1><span style="font-size:1.6em">🐺</span> PANEL PRO <span style="font-size:1.6em">🐺</span></h1>
 <p>ACCESO PRIVADO</p>
 <form method="POST" action="/login">
 <label>Usuario</label>
@@ -78,7 +84,11 @@ module.exports = function activarSeguridad(app) {
     next();
   });
 
-  app.get('/login', (req, res) => {
+      // CQ3_DISENO_POSTBOT_V4
+    app.get('/cq3-postbot.png', (req, res) => {
+        return res.sendFile(path.join(__dirname, 'cq3-postbot.png'));
+    });
+app.get('/login', (req, res) => {
     res.send(paginaLogin());
   });
 
