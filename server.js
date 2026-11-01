@@ -1597,10 +1597,81 @@ app.post('/admin/panel/:cid/accion',
         return res.sendStatus(403);
       }
 
-      // No permitir borrar desde esta integracion inicial.
+      // CQ3_BORRADO_CORREGIDO_V1
       if (req.body.accion === 'borrarperfil') {
-        return res.status(403).send(
-          'Borrado pendiente de control seguro');
+        if (!/^[A-Za-z0-9_-]{1,50}$/.test(id)) {
+          return res.sendStatus(400);
+        }
+
+        const io = require('fs');
+        const pt = require('path');
+
+        const datos = leerData();
+        if (!Object.prototype.hasOwnProperty.call(datos, id)) {
+          return res.sendStatus(404);
+        }
+
+        // El propietario ya fue comprobado arriba.
+        const mapaRuta = pt.join(
+          __dirname,
+          'clientes_data',
+          'cq_propietarios_perfiles.json'
+        );
+
+        if (!io.existsSync(mapaRuta) ||
+            !io.existsSync(DATA_FILE) ||
+            !io.existsSync(STATE_FILE)) {
+          return res.status(500).send(
+            'No se puede crear respaldo completo'
+          );
+        }
+
+        const carpeta = pt.join(
+          pt.dirname(mapaRuta),
+          'respaldos_borrado'
+        );
+        io.mkdirSync(carpeta, { recursive: true });
+
+        const marca = Date.now() + '-' + id;
+
+        for (const [archivo, nombre] of [
+          [DATA_FILE, 'perfiles'],
+          [STATE_FILE, 'estado'],
+          [mapaRuta, 'propietarios']
+        ]) {
+          io.copyFileSync(
+            archivo,
+            pt.join(carpeta, marca + '-' + nombre + '.bak')
+          );
+        }
+
+        // Motor original: borra perfil y programaciones.
+        const ok = borrarPerfil(id);
+        if (!ok) {
+          return res.status(500).send(
+            'No se pudo borrar el perfil'
+          );
+        }
+
+        cfg.propietarios = cfg.propietarios || {};
+        cfg.ocultarEnPrincipal =
+          cfg.ocultarEnPrincipal || {};
+
+        delete cfg.propietarios[id];
+        delete cfg.ocultarEnPrincipal[id];
+
+        const temporal = mapaRuta + '.cq3_delete_tmp';
+        io.writeFileSync(
+          temporal,
+          JSON.stringify(cfg, null, 2),
+          'utf8'
+        );
+        io.renameSync(temporal, mapaRuta);
+
+        return res.redirect(
+          '/admin/panel/' +
+          encodeURIComponent(req.cqClienteSeleccionado)
+        );
       }
 
       const pref = '/admin/panel/' +
