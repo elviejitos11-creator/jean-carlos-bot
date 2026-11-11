@@ -746,7 +746,7 @@ function cq3Formato(timestamp) {
 }
 
 async function cq3IniciarProgramacion(q, id, accion, chatId) {
-  if (!Object.prototype.hasOwnProperty.call(leerData(), id)) {
+  if (id !== '__TODAS__' && !Object.prototype.hasOwnProperty.call(leerData(), id)) {
     await responderCallback(q.id, 'Perfil no encontrado');
     return;
   }
@@ -757,13 +757,13 @@ async function cq3IniciarProgramacion(q, id, accion, chatId) {
     x => String(x.id) === String(id) && x.accion === accion
   );
 
-  const nombre = accion === 'PAUSADA' ? 'PAUSAR' : 'REANUDAR';
+  const nombre = id === '__TODAS__' ? (accion === 'PAUSADA' ? 'PAUSAR TODAS' : 'REANUDAR TODAS') : (accion === 'PAUSADA' ? 'PAUSAR' : 'REANUDAR');
 
   await responderCallback(q.id, 'Introduce fecha y hora');
 
   await enviarTexto(
     '⏰ PROGRAMACIÓN\n\n' +
-    'Perfil ID: ' + id + '\n' +
+    'Alcance: ' + (id === '__TODAS__' ? 'TODAS LAS PAGINAS' : 'Perfil ID ' + id) + '\n' +
     'Acción: ' + nombre + '\n' +
     'Estado actual: ' +
     (existente ? cq3Formato(existente.ejecutarEn) : 'No programado') +
@@ -828,7 +828,7 @@ async function cq3LeerProgramacion(msg) {
 
     await enviarTexto(
       '✅ PROGRAMACIÓN GUARDADA\n\n' +
-      'Perfil ID: ' + id + '\n' +
+      'Alcance: ' + (id === '__TODAS__' ? 'TODAS LAS PAGINAS' : 'Perfil ID ' + id) + '\n' +
       'Acción: ' + (accion === 'PAUSADA' ? 'PAUSAR' : 'REANUDAR') +
       '\nFecha y hora: ' + cq3Formato(ejecutarEn) +
       '\nZona horaria: República Dominicana',
@@ -1249,12 +1249,12 @@ async function procesarCallback(q) {
   }
 
   if (accion === 'progpausa') {
-    await cq3IniciarProgramacion(q, id, 'PAUSADA', chatId);
+    await cq3IniciarProgramacion(q, '__TODAS__', 'PAUSADA', chatId);
     return;
   }
 
   if (accion === 'progreanudar') {
-    await cq3IniciarProgramacion(q, id, 'ACTIVA', chatId);
+    await cq3IniciarProgramacion(q, '__TODAS__', 'ACTIVA', chatId);
     return;
   }
 
@@ -1392,11 +1392,15 @@ async function ejecutarProgramaciones() {
   for (const item of state.schedules) {
     if (Date.now() >= item.ejecutarEn) {
       cambio = true;
-      cambiarEstadoPerfil(item.id, item.accion);
+      if (item.id === '__TODAS__') {
+        cambiarEstadoTodos(item.accion);
+      } else {
+        cambiarEstadoPerfil(item.id, item.accion);
+      }
       await enviarTexto(
-        `⏰ Programación ejecutada\nPerfil: ${item.id}\nNuevo estado: ${item.accion}`
+        `⏰ Programación ejecutada\nAlcance: ${item.id === '__TODAS__' ? 'TODAS LAS PAGINAS' : item.id}\nNuevo estado: ${item.accion}`
       );
-      await enviarEstadoPerfil(item.id);
+      if (item.id !== '__TODAS__') await enviarEstadoPerfil(item.id);
     } else {
       pendientes.push(item);
     }
