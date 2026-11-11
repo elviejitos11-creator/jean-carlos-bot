@@ -672,6 +672,179 @@ function borrarPerfil(id) {
   return guardarData(data);
 }
 
+
+const cq3Pendientes = new Map();
+
+function cq3Clave(chat, usuario) {
+  return String(chat) + ':' + String(usuario);
+}
+
+function cq3Fecha(texto) {
+  const m = String(texto).trim().toUpperCase().match(
+    /^(HOY|MAÑANA|MANANA|\d{1,2}\/\d{1,2}(?:\/\d{4})?)\s+(\d{1,2}):(\d{2})\s*(AM|PM)?$/
+  );
+  if (!m) throw Error('Formato inválido. Ejemplo: MAÑANA 2:00 AM');
+
+  const partes = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Santo_Domingo',
+    year: 'numeric', month: '2-digit', day: '2-digit'
+  }).formatToParts(new Date());
+
+  const dato = t => Number(partes.find(x => x.type === t).value);
+  let anio = dato('year');
+  let mes = dato('month');
+  let dia = dato('day');
+
+  if (m[1] === 'MAÑANA' || m[1] === 'MANANA') {
+    const d = new Date(Date.UTC(anio, mes - 1, dia + 1));
+    anio = d.getUTCFullYear();
+    mes = d.getUTCMonth() + 1;
+    dia = d.getUTCDate();
+  } else if (m[1] !== 'HOY') {
+    const p = m[1].split('/').map(Number);
+    dia = p[0];
+    mes = p[1];
+    if (p.length === 3) anio = p[2];
+  }
+
+  let hora = Number(m[2]);
+  const minuto = Number(m[3]);
+  const periodo = m[4];
+
+  if (minuto > 59 || (periodo && (hora < 1 || hora > 12)) ||
+      (!periodo && hora > 23)) {
+    throw Error('La hora no es válida.');
+  }
+
+  if (periodo) {
+    hora = hora % 12 + (periodo === 'PM' ? 12 : 0);
+  }
+
+  const d = new Date(Date.UTC(anio, mes - 1, dia));
+
+  if (d.getUTCFullYear() !== anio ||
+      d.getUTCMonth() + 1 !== mes ||
+      d.getUTCDate() !== dia) {
+    throw Error('La fecha no es válida.');
+  }
+
+  const timestamp = Date.UTC(anio, mes - 1, dia, hora + 4, minuto);
+
+  if (timestamp <= Date.now()) {
+    throw Error('La fecha y hora deben ser futuras.');
+  }
+
+  return timestamp;
+}
+
+function cq3Formato(timestamp) {
+  return new Date(timestamp).toLocaleString('es-DO', {
+    timeZone: 'America/Santo_Domingo',
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: 'numeric', minute: '2-digit', hour12: true
+  });
+}
+
+async function cq3IniciarProgramacion(q, id, accion, chatId) {
+  if (!Object.prototype.hasOwnProperty.call(leerData(), id)) {
+    await responderCallback(q.id, 'Perfil no encontrado');
+    return;
+  }
+
+  cq3Pendientes.set(cq3Clave(chatId, q.from?.id), { id, accion });
+
+  const existente = (leerState().schedules || []).find(
+    x => String(x.id) === String(id) && x.accion === accion
+  );
+
+  const nombre = accion === 'PAUSADA' ? 'PAUSAR' : 'REANUDAR';
+
+  await responderCallback(q.id, 'Introduce fecha y hora');
+
+  await enviarTexto(
+    '⏰ PROGRAMACIÓN\n\n' +
+    'Perfil ID: ' + id + '\n' +
+    'Acción: ' + nombre + '\n' +
+    'Estado actual: ' +
+    (existente ? cq3Formato(existente.ejecutarEn) : 'No programado') +
+    '\n\nEscribe fecha y hora:\n\n' +
+    'HOY 5:00 AM\n' +
+    'MAÑANA 2:00 AM\n' +
+    '09/05 5:00 AM\n\n' +
+    'Formato: DÍA/MES HORA\n' +
+    'Zona horaria: República Dominicana\n\n' +
+    'Escribe CANCELAR para quitar esa programación.',
+    chatId
+  );
+}
+
+async function cq3LeerProgramacion(msg) {
+  const chatId = msg.chat?.id;
+  const key = cq3Clave(chatId, msg.from?.id);
+  const pendiente = cq3Pendientes.get(key);
+
+  if (!pendiente) return false;
+
+  const texto = String(msg.text || '').trim();
+  if (!texto) return false;
+
+  const { id, accion } = pendiente;
+
+  if (texto.toUpperCase() === 'CANCELAR') {
+    const estado = leerState();
+    const antes = (estado.schedules || []).length;
+
+    estado.schedules = (estado.schedules || []).filter(
+      x => !(String(x.id) === String(id) && x.accion === accion)
+    );
+
+    guardarState(estado);
+    cq3Pendientes.delete(key);
+
+    await enviarTexto(
+      antes !== estado.schedules.length
+        ? '✅ PROGRAMACIÓN CANCELADA\nPerfil ID: ' + id
+        : '✅ No había una programación pendiente para el perfil ' + id,
+      chatId
+    );
+    return true;
+  }
+
+  try {
+    const ejecutarEn = cq3Fecha(texto);
+    const estado = leerState();
+
+    estado.schedules = (estado.schedules || []).filter(
+      x => !(String(x.id) === String(id) && x.accion === accion)
+    );
+
+    estado.schedules.push({ id, accion, ejecutarEn });
+
+    if (!guardarState(estado)) {
+      throw Error('No se pudo guardar la programación.');
+    }
+
+    cq3Pendientes.delete(key);
+
+    await enviarTexto(
+      '✅ PROGRAMACIÓN GUARDADA\n\n' +
+      'Perfil ID: ' + id + '\n' +
+      'Acción: ' + (accion === 'PAUSADA' ? 'PAUSAR' : 'REANUDAR') +
+      '\nFecha y hora: ' + cq3Formato(ejecutarEn) +
+      '\nZona horaria: República Dominicana',
+      chatId
+    );
+  } catch (e) {
+    await enviarTexto(
+      '⚠️ ' + e.message +
+      '\n\nIntenta de nuevo o escribe CANCELAR.',
+      chatId
+    );
+  }
+
+  return true;
+}
+
 function programarAccion(id, accion, minutos = 30) {
   const state = leerState();
   state.schedules.push({
@@ -1076,16 +1249,12 @@ async function procesarCallback(q) {
   }
 
   if (accion === 'progpausa') {
-    programarAccion(id, 'PAUSADA', 30);
-    await responderCallback(callbackId, 'Pausa programada');
-    await enviarTexto(`⏰ Se programó una pausa para el perfil ${id} en 30 minutos.`, chatId);
+    await cq3IniciarProgramacion(q, id, 'PAUSADA', chatId);
     return;
   }
 
   if (accion === 'progreanudar') {
-    programarAccion(id, 'ACTIVA', 30);
-    await responderCallback(callbackId, 'Reanudación programada');
-    await enviarTexto(`⏰ Se programó una reanudación para el perfil ${id} en 30 minutos.`, chatId);
+    await cq3IniciarProgramacion(q, id, 'ACTIVA', chatId);
     return;
   }
 
@@ -1150,6 +1319,12 @@ async function revisarTelegram() {
         if (msg.text) {
           const texto = msg.text.trim().toUpperCase();
 
+          if (await cq3LeerProgramacion(msg)) {
+            state.schedules = leerState().schedules;
+            guardarState(state);
+            continue;
+          }
+
           if (/^P\d+$/.test(texto)) {
             const id = texto.replace('P', '');
             const data = leerData();
@@ -1200,6 +1375,7 @@ async function revisarTelegram() {
       }
     }
 
+    state.schedules = leerState().schedules;
     guardarState(state);
   } catch (error) {
     console.log('Error en revisarTelegram:', error?.message || error);
