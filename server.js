@@ -1526,6 +1526,29 @@ function cqPantallaCompartida(req, res) {
       }, 10000);
 
       async function accionPerfil(id, accion) {
+        let fechaHora = null;
+        const esProgramacion =
+          accion === 'progpausa' || accion === 'progreanudar';
+
+        if (esProgramacion) {
+          fechaHora = prompt(
+            '⏰ PROGRAMACIÓN - PERFIL ' + id +
+            '\n\nEscribe fecha y hora:' +
+            '\nHOY 5:00 AM' +
+            '\nMAÑANA 2:00 AM' +
+            '\n09/05 5:00 AM' +
+            '\n\nEscribe CANCELAR para quitarla.' +
+            '\n\nHorario: República Dominicana'
+          );
+
+          if (fechaHora === null) return;
+          fechaHora = fechaHora.trim();
+
+          if (!fechaHora) {
+            alert('Debes escribir fecha y hora.');
+            return;
+          }
+        }
         if (accion === 'resetacceso') {
           const ok = confirm('¿Seguro que quieres resetear este perfil? Se borrarán fotos, datos viejos, contadores y la clave vieja dejará de funcionar.');
           if (!ok) return;
@@ -1539,12 +1562,31 @@ function cqPantallaCompartida(req, res) {
           if (!ok2) return;
         }
 
-        await fetch('/accion', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id, accion })
-        });
-        location.reload();
+        try {
+          const respuesta = await fetch('/accion', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id, accion, fechaHora })
+          });
+
+          if (esProgramacion) {
+            const datos = await respuesta.json();
+
+            if (!respuesta.ok || !datos.ok) {
+              alert(datos.error || 'No se pudo programar.');
+              return;
+            }
+
+            alert(datos.mensaje);
+          } else if (!respuesta.ok) {
+            alert('La acción no se completó.');
+            return;
+          }
+
+          location.reload();
+        } catch (error) {
+          alert('Error de conexión. Intenta nuevamente.');
+        }
       }
 
       async function accionGlobal(accion) {
@@ -1625,6 +1667,52 @@ function cqPantallaCompartida(req, res) {
 
     html = html.replace(/<body([^>]*)>/i, m => m + bloque);
   }
+
+  // CQ3_AGENDA_WEB_VISIBLE_V1
+  const agendaVisible = (leerState().schedules || [])
+    .filter(item => {
+      if (!item || !Number.isFinite(Number(item.ejecutarEn))) {
+        return false;
+      }
+
+      if (Number(item.ejecutarEn) <= Date.now()) return false;
+
+      if (item.id === '__TODAS__') {
+        return !req.cqClienteSeleccionado;
+      }
+
+      return Object.prototype.hasOwnProperty.call(
+        data, String(item.id)
+      );
+    })
+    .sort((a, b) => Number(a.ejecutarEn) - Number(b.ejecutarEn));
+
+  const filasAgenda = agendaVisible.map(item => {
+    const alcance = item.id === '__TODAS__'
+      ? 'TODAS LAS PÁGINAS'
+      : 'Perfil ' + String(item.id).replace(/[^a-zA-Z0-9_-]/g, '');
+
+    const accionTexto = item.accion === 'PAUSADA'
+      ? '⏸ PAUSAR' : '▶️ REANUDAR';
+
+    return '<div style="padding:10px;border-bottom:1px solid #38516b">' +
+      '<strong>' + accionTexto + '</strong> — ' + alcance +
+      '<div style="margin-top:5px">' +
+      cq3Formato(Number(item.ejecutarEn)) +
+      '</div></div>';
+  }).join('');
+
+  const bloqueAgenda =
+    '<section style="background:#132f4c;padding:18px;' +
+    'border-radius:14px;margin:0 0 20px">' +
+    '<h2>⏰ PROGRAMACIONES PENDIENTES</h2>' +
+    (filasAgenda || '<p>No hay programaciones pendientes.</p>') +
+    '</section>';
+
+  html = html.replace(
+    '<div class="grid">',
+    bloqueAgenda + '<div class="grid">'
+  );
 
   res.send(html);
 }
@@ -2122,12 +2210,62 @@ app.post('/accion', async (req, res) => {
     } else {
       await enviarTexto(`⚠️ No se pudo borrar el perfil ${id}`);
     }
-  } else if (accion === 'progpausa') {
-    programarAccion(id, 'PAUSADA', 30);
-    await enviarTexto(`⏰ Se programó una pausa para ${data[id].nombre} en 30 minutos.`);
-  } else if (accion === 'progreanudar') {
-    programarAccion(id, 'ACTIVA', 30);
-    await enviarTexto(`⏰ Se programó una reanudación para ${data[id].nombre} en 30 minutos.`);
+  } else if (accion === 'progpausa' || accion === 'progreanudar') {
+    const estadoNuevo = accion === 'progpausa'
+      ? 'PAUSADA' : 'ACTIVA';
+
+    try {
+      const entrada = String(req.body.fechaHora || '').trim();
+
+      if (!entrada) {
+        return res.status(400).json({
+          ok: false, error: 'Debes indicar fecha y hora.'
+        });
+      }
+
+      const state = leerState();
+      state.schedules = Array.isArray(state.schedules)
+        ? state.schedules : [];
+
+      const anteriores = state.schedules.length;
+
+      state.schedules = state.schedules.filter(item =>
+        !(String(item.id) === String(id) &&
+          item.accion === estadoNuevo)
+      );
+
+      let mensaje;
+
+      if (entrada.toUpperCase() === 'CANCELAR') {
+        mensaje = anteriores !== state.schedules.length
+          ? 'Programación cancelada para el perfil ' + id
+          : 'No había programación para el perfil ' + id;
+      } else {
+        const ejecutarEn = cq3Fecha(entrada);
+
+        state.schedules.push({
+          id, accion: estadoNuevo, ejecutarEn
+        });
+
+        mensaje = '✅ PROGRAMACIÓN GUARDADA' +
+          '\nPerfil: ' + id +
+          '\nAcción: ' +
+          (estadoNuevo === 'PAUSADA' ? 'PAUSAR' : 'REANUDAR') +
+          '\nFecha: ' + cq3Formato(ejecutarEn);
+      }
+
+      if (!guardarState(state)) {
+        return res.status(500).json({
+          ok: false, error: 'No se pudo guardar la agenda.'
+        });
+      }
+
+      return res.json({ ok: true, mensaje });
+    } catch (error) {
+      return res.status(400).json({
+        ok: false, error: error.message
+      });
+    }
   } else if (accion === 'ultima') {
     await enviarUltimaActualizacion(id);
   } else if (accion === 'foto') {
