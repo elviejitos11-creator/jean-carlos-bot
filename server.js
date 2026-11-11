@@ -2056,8 +2056,8 @@ app.listen(PORT, async () => {
     });
   }
 
-  // Telegram desactivado durante el desarrollo
-  // Ciclo Telegram desactivado durante el desarrollo
+  await apiTelegram('deleteWebhook', {});
+  cicloPrincipal();
 });
      
 app.get('/administracion', (req, res) => {
