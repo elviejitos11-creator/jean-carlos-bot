@@ -1533,12 +1533,12 @@ function cqPantallaCompartida(req, res) {
         if (esProgramacion) {
           fechaHora = prompt(
             '⏰ PROGRAMACIÓN - PERFIL ' + id +
-            '\n\nEscribe fecha y hora:' +
-            '\nHOY 5:00 AM' +
-            '\nMAÑANA 2:00 AM' +
-            '\n09/05 5:00 AM' +
-            '\n\nEscribe CANCELAR para quitarla.' +
-            '\n\nHorario: República Dominicana'
+            '\\n\\nEscribe fecha y hora:' +
+            '\\nHOY 5:00 AM' +
+            '\\nMAÑANA 2:00 AM' +
+            '\\n09/05 5:00 AM' +
+            '\\n\\nEscribe CANCELAR para quitarla.' +
+            '\\n\\nHorario: República Dominicana'
           );
 
           if (fechaHora === null) return;
