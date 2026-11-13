@@ -680,6 +680,18 @@ function cq3Clave(chat, usuario) {
 }
 
 function cq3Fecha(texto) {
+  const intervalo = String(texto).trim().toUpperCase()
+    .match(/^EN\s+(\d+)\s*(MIN|MINUTO|MINUTOS)$/);
+
+  if (intervalo) {
+    const minutos = Number(intervalo[1]);
+    if (!Number.isSafeInteger(minutos) ||
+        minutos < 1 || minutos > 10080) {
+      throw Error('Indica entre 1 y 10080 minutos.');
+    }
+    return Date.now() + minutos * 60000;
+  }
+
   const m = String(texto).trim().toUpperCase().match(
     /^(HOY|MAÑANA|MANANA|\d{1,2}\/\d{1,2}(?:\/\d{4})?)\s+(\d{1,2}):(\d{2})\s*(AM|PM)?$/
   );
@@ -1394,13 +1406,20 @@ async function ejecutarProgramaciones() {
       cambio = true;
       if (item.id === '__TODAS__') {
         cambiarEstadoTodos(item.accion);
+      } else if (item.id === '__CQ3_WEB_TODAS__') {
+        const permitidos = new Set(cq3IdsDePanel(item.cq3Scope));
+        for (const id of permitidos) {
+          if (permitidos.has(String(id))) {
+            cambiarEstadoPerfil(String(id), item.accion);
+          }
+        }
       } else {
         cambiarEstadoPerfil(item.id, item.accion);
       }
       await enviarTexto(
-        `⏰ Programación ejecutada\nAlcance: ${item.id === '__TODAS__' ? 'TODAS LAS PAGINAS' : item.id}\nNuevo estado: ${item.accion}`
+        `⏰ Programación ejecutada\nAlcance: ${item.id === '__TODAS__' || item.id === '__CQ3_WEB_TODAS__' ? 'TODAS LAS PAGINAS' : item.id}\nNuevo estado: ${item.accion}`
       );
-      if (item.id !== '__TODAS__') await enviarEstadoPerfil(item.id);
+      if (item.id !== '__TODAS__' && item.id !== '__CQ3_WEB_TODAS__') await enviarEstadoPerfil(item.id);
     } else {
       pendientes.push(item);
     }
@@ -1415,6 +1434,21 @@ async function ejecutarProgramaciones() {
 // =========================
 // PANEL WEB
 // =========================
+
+function cq3IdsDePanel(scope) {
+  const datos = leerData();
+  const cfg = cqPropietarios();
+  const propietarios = cfg.propietarios || {};
+  const ocultos = cfg.ocultarEnPrincipal || {};
+
+  return Object.keys(datos).filter(id => {
+    if (scope === 'principal') {
+      return !Object.prototype.hasOwnProperty.call(ocultos, id);
+    }
+    return propietarios[id] === scope;
+  });
+}
+
 function cqPantallaCompartida(req, res) {
   const todos = leerData();
   const data = {};
@@ -1532,7 +1566,7 @@ function cqPantallaCompartida(req, res) {
 
         if (esProgramacion) {
           fechaHora = prompt(
-            '⏰ PROGRAMACIÓN - PERFIL ' + id +
+            '⏰ PROGRAMACIÓN - TODAS LAS PÁGINAS' +
             '\\n\\nEscribe fecha y hora:' +
             '\\nHOY 5:00 AM' +
             '\\nMAÑANA 2:00 AM' +
@@ -1680,6 +1714,10 @@ function cqPantallaCompartida(req, res) {
       if (item.id === '__TODAS__') {
         return !req.cqClienteSeleccionado;
       }
+      if (item.id === '__CQ3_WEB_TODAS__') {
+        return item.cq3Scope ===
+          String(req.cqClienteSeleccionado || 'principal');
+      }
 
       return Object.prototype.hasOwnProperty.call(
         data, String(item.id)
@@ -1688,9 +1726,10 @@ function cqPantallaCompartida(req, res) {
     .sort((a, b) => Number(a.ejecutarEn) - Number(b.ejecutarEn));
 
   const filasAgenda = agendaVisible.map(item => {
-    const alcance = item.id === '__TODAS__'
-      ? 'TODAS LAS PÁGINAS'
-      : 'Perfil ' + String(item.id).replace(/[^a-zA-Z0-9_-]/g, '');
+    const alcance =
+      item.id === '__TODAS__' || item.id === '__CQ3_WEB_TODAS__'
+        ? 'TODAS LAS PÁGINAS'
+        : 'Perfil ' + String(item.id).replace(/[^a-zA-Z0-9_-]/g, '');
 
     const accionTexto = item.accion === 'PAUSADA'
       ? '⏸ PAUSAR' : '▶️ REANUDAR';
@@ -2214,12 +2253,21 @@ app.post('/accion', async (req, res) => {
     const estadoNuevo = accion === 'progpausa'
       ? 'PAUSADA' : 'ACTIVA';
 
+    const scope = String(req.cqClienteSeleccionado || 'principal');
+    const ids = cq3IdsDePanel(scope);
+
+    if (!ids.includes(String(id))) {
+      return res.status(403).json({
+        ok: false, error: 'Perfil fuera de este panel.'
+      });
+    }
+
     try {
       const entrada = String(req.body.fechaHora || '').trim();
 
       if (!entrada) {
         return res.status(400).json({
-          ok: false, error: 'Debes indicar fecha y hora.'
+          ok: false, error: 'Escribe fecha y hora o EN 5 MIN.'
         });
       }
 
@@ -2227,29 +2275,51 @@ app.post('/accion', async (req, res) => {
       state.schedules = Array.isArray(state.schedules)
         ? state.schedules : [];
 
-      const anteriores = state.schedules.length;
+      const antes = state.schedules.length;
 
-      state.schedules = state.schedules.filter(item =>
-        !(String(item.id) === String(id) &&
-          item.accion === estadoNuevo)
+      state.schedules = state.schedules.filter(t =>
+        !(
+          t.accion === estadoNuevo &&
+          (
+            (t.id === '__CQ3_WEB_TODAS__' &&
+              t.cq3Scope === scope)
+          )
+        )
       );
 
       let mensaje;
 
       if (entrada.toUpperCase() === 'CANCELAR') {
-        mensaje = anteriores !== state.schedules.length
-          ? 'Programación cancelada para el perfil ' + id
-          : 'No había programación para el perfil ' + id;
+        mensaje = antes !== state.schedules.length
+          ? 'Programación cancelada para TODAS LAS PÁGINAS'
+          : 'No había programación para cancelar.';
       } else {
         const ejecutarEn = cq3Fecha(entrada);
 
+        const conflicto = state.schedules.some(t =>
+          t.id === '__CQ3_WEB_TODAS__' &&
+          t.cq3Scope === scope &&
+          t.accion !== estadoNuevo &&
+          Number(t.ejecutarEn) === ejecutarEn
+        );
+
+        if (conflicto) {
+          return res.status(400).json({
+            ok: false,
+            error: 'Ya existe una orden contraria a esa misma hora.'
+          });
+        }
+
         state.schedules.push({
-          id, accion: estadoNuevo, ejecutarEn
+          id: '__CQ3_WEB_TODAS__',
+          cq3Scope: scope,
+          accion: estadoNuevo,
+          ejecutarEn
         });
 
-        mensaje = '✅ PROGRAMACIÓN GUARDADA' +
-          '\nPerfil: ' + id +
-          '\nAcción: ' +
+        mensaje = 'PROGRAMACIÓN GUARDADA\n' +
+          'Alcance: TODAS LAS PÁGINAS (' + ids.length + ')\n' +
+          'Acción: ' +
           (estadoNuevo === 'PAUSADA' ? 'PAUSAR' : 'REANUDAR') +
           '\nFecha: ' + cq3Formato(ejecutarEn);
       }
@@ -2377,7 +2447,7 @@ app.listen(PORT, async () => {
   await apiTelegram('deleteWebhook', {});
   cicloPrincipal();
 });
-     
+
 app.get('/administracion', (req, res) => {
   res.sendFile(path.join(__dirname, 'admin_clientes.html'));
 });
