@@ -110,7 +110,7 @@ module.exports = function(app, opciones = {}) {
     // JEAN BOT: datos recibidos del script
     for (const campo of ['texto','foto_modelo',
       'foto_pagina','foto_bump','foto_bump_base64',
-      'fin_plan','modo_guardia','ultima_alerta']) {
+      'modo_guardia','ultima_alerta']) {
       if (typeof req.body[campo] === "string") {
         const valor = req.body[campo];
         if (valor.length <= (campo.startsWith("foto")

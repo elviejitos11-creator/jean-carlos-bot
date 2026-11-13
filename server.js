@@ -249,7 +249,7 @@ function asegurarPerfil(data, id) {
       ultima_hora: 'N/A',
       proximo_post: '16m',
       proximo_post_ts: null,
-      fin_plan: '7 días',
+      fin_plan: new Date(Date.now() + 7 * 86400000).toISOString(),
       ultima_accion: 'Creado',
       ultimo_evento: null,
       bump_hoy: 0,
@@ -314,13 +314,10 @@ function tiempoRestantePlan(fechaFin) {
 }
 
 function planVencido(perfil) {
-  if (!perfil || !perfil.fin_plan) return false;
-
-  const fin = new Date(perfil.fin_plan);
-
-  if (isNaN(fin.getTime())) return false;
-
-  return fin <= new Date();
+  if (!perfil || !perfil.fin_plan) return true;
+  const fecha = Date.parse(perfil.fin_plan);
+  if (!Number.isFinite(fecha)) return true;
+  return fecha <= Date.now();
 }
 
 function puedeContarBump(perfil) {
@@ -556,6 +553,10 @@ function cambiarEstadoPerfil(id, estado) {
 
   asegurarPerfil(data, id);
 
+  if (estado === 'ACTIVA' && planVencido(data[id])) {
+    return false;
+  }
+
   if (estado === 'PAUSADA' && Array.isArray(colaReanudacion)) {
     colaReanudacion = colaReanudacion.filter(x => String(x) !== String(id));
   }
@@ -576,6 +577,7 @@ function cambiarEstadoTodos(estado) {
 
   for (const id of Object.keys(data)) {
     asegurarPerfil(data, id);
+    if (estado === 'ACTIVA' && planVencido(data[id])) continue;
     data[id].estado = estado;
     data[id].ultima_hora = horaActual();
     data[id].ultima_accion =
@@ -1068,6 +1070,13 @@ app.get('/api/estado/:id', (req, res) => {
       });
     }
 
+    if (planVencido(perfil)) {
+      return res.json({
+        estado: 'VENCIDA',
+        motivo: 'Plan vencido o sin fecha valida'
+      });
+    }
+
     if (perfil.estado === 'PAUSADA') {
       return res.json({
         estado: 'PAUSADA',
@@ -1163,7 +1172,8 @@ app.post('/registrar-evento', async (req, res) => {
     }
   }
 
-  if (fin_plan) perfil.fin_plan = convertirFinPlan(fin_plan);
+  // La vigencia se administra desde el panel.
+  // Los eventos del motor no pueden renovarla.
 
   perfil.ultima_hora = ultima_hora || horaActual();
   perfil.ultima_accion = ultima_accion || tipoNormal;
@@ -2379,9 +2389,17 @@ async function procesarColaReanudacion(versionActiva) {
 
   if (versionActiva !== colaVersion) return;
 
-  cambiarEstadoPerfil(id, 'ACTIVA');
-  await enviarTexto(`▶️ Perfil ${id} reanudado automáticamente en cola.`);
-  await enviarEstadoPerfil(id);
+  const reanudado = cambiarEstadoPerfil(id, 'ACTIVA');
+
+  if (reanudado) {
+    await enviarTexto('Perfil ' + id + ' reanudado en cola.');
+    await enviarEstadoPerfil(id);
+  } else {
+    await enviarTexto(
+      'Perfil ' + id +
+      ': reanudacion denegada. Verificar licencia y vencimiento.'
+    );
+  }
 
   if (versionActiva !== colaVersion) return;
 
