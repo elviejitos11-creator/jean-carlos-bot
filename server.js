@@ -330,19 +330,34 @@ function puedeContarBump(perfil) {
 function convertirFinPlan(valor) {
   if (!valor) return '';
 
-  const texto = String(valor).trim().toLowerCase();
+  const texto=String(valor).trim().toLowerCase();
 
-  if (/^\d{4}-\d{2}-\d{2}(t\d{2}:\d{2}:\d{2})?$/.test(texto)) {
+  if (/^\d{4}-\d{2}-\d{2}(t\d{2}:\d{2}:\d{2})?$/.test(texto))
     return valor;
+
+  const combinado=texto.match(
+    /^(\d+)\s*d[ií]a?s?\s+(\d+)\s*horas?$/
+  );
+
+  if (combinado) {
+    const dias=Number(combinado[1]);
+    const horas=Number(combinado[2]);
+    const ms=(dias*24+horas)*3600000;
+    if (!Number.isSafeInteger(ms)) return valor;
+    return new Date(Date.now()+ms-(ms===0?1000:0)).toISOString();
   }
 
-  const m = texto.match(/^(\d+)\s*d[ií]a?s?$/);
+  const m=texto.match(/^(\d+)\s*d[ií]a?s?$/);
+
   if (m) {
-    const dias = Number(m[1]);
-    const fecha = new Date();
-    fecha.setDate(fecha.getDate() + dias);
-    fecha.setHours(23, 59, 59, 0);
-    return fecha.toISOString().slice(0, 19);
+    const dias=Number(m[1]);
+    if (dias===0)
+      return new Date(Date.now()-1000).toISOString();
+
+    const fecha=new Date();
+    fecha.setDate(fecha.getDate()+dias);
+    fecha.setHours(23,59,59,0);
+    return fecha.toISOString();
   }
 
   return valor;
@@ -1539,7 +1554,7 @@ function cqPantallaCompartida(req, res) {
         <div class="row">📞 ${p.telefono || 'N/A'}</div>
         <div class="row">🆔 Código: ${p.codigo || 'N/A'}</div>
         <div class="row">📍 ${p.ubicacion || 'N/A'}</div>
-        <div class="row estado">🟢 ${p.estado}</div>
+        <div class="row estado">${planVencido(p) ? "❌ VENCIDA" : (p.estado === "ACTIVA" ? "🟢 ACTIVA" : "🔴 PAUSADA")}</div>
         <div class="row">🕒 ${p.ultima_hora}</div>
         <div class="row">⏱ Próximo bump: ${p.proximo_post_ts ? tiempoRestante(p.proximo_post_ts) : (p.proximo_post || 'N/A')}</div>
         <div class="row">📅 ${tiempoRestantePlan(p.fin_plan)}</div>
