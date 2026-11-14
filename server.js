@@ -84,6 +84,8 @@ app.post('/accion', async (req, res, next) => {
   const recibido = String(req.get('x-cliente-token') || '').trim();
 
   if (!esperado || !recibido) {
+    // CQ3_LOBO_AUTH_LOG_V2
+    console.warn('[CQ3_LOBO_AUTH]', !esperado ? 'PERFIL_SIN_TOKEN' : 'LOBO_SIN_TOKEN');
     return res.status(401).json({
       ok: false, error: !esperado ? 'PERFIL_SIN_TOKEN' : 'LOBO_SIN_TOKEN'
     });
@@ -92,8 +94,8 @@ app.post('/accion', async (req, res, next) => {
   const a = Buffer.from(recibido, 'utf8');
   const b = Buffer.from(esperado, 'utf8');
 
-  if (a.length !== b.length ||
-      !require('crypto').timingSafeEqual(a, b)) {
+  if (a.length !== b.length || !require('crypto').timingSafeEqual(a, b)) {
+    console.warn('[CQ3_LOBO_AUTH] TOKEN_NO_COINCIDE');
     return res.status(401).json({
       ok: false, error: 'TOKEN_NO_COINCIDE'
     });
