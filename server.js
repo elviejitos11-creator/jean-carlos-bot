@@ -80,7 +80,7 @@ app.post('/accion', async (req, res, next) => {
     });
   }
 
-  const esperado = String(perfil.cliente_token || '').trim();
+  const esperado = String(perfil.cliente_token || id).trim(); // CQ3_ID_SIN_CLAVE_V2
   const recibido = String(req.get('x-cliente-token') || '').trim();
 
   if (!esperado || !recibido) {
@@ -2379,7 +2379,7 @@ app.post('/guardar-perfil', (req, res) => {
 
   data[id].nombre = nombre || `Perfil ${id}`;
   data[id].chat_id = chat_id || '';
-  data[id].cliente_token = String(cliente_token || '').trim() || data[id].cliente_token || '';
+  data[id].cliente_token = String(cliente_token || '').trim(); // CQ3_PERMITIR_BORRAR_CLAVE_V2
   data[id].telefono = telefono || '';
   data[id].codigo = codigo || '';
   data[id].ubicacion = ubicacion || '';
