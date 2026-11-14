@@ -564,7 +564,7 @@ function tecladoTelegram(id) {
         { text: '🔄 Reiniciar bot', callback_data: `reiniciar_${id}` }
       ],
       [
-        { text: '📞 Contactar', url: SUPPORT_URL },
+        { text: '📞 Contactar', url: 'https://wa.me/18097760519' },
         { text: '📜 Ver reglas', callback_data: 'reglas' }
       ],
       [
