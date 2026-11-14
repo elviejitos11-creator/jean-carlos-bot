@@ -1430,17 +1430,46 @@ async function procesarCallback(q) {
     return;
   }
 
-  if (accion === 'pausar') {
-    cambiarEstadoPerfil(id, 'PAUSADA');
-    await responderCallback(callbackId, 'Perfil pausado');
-    await enviarEstadoPerfil(id);
-    return;
-  }
+  // CQ3_TG_INDIVIDUAL_V1
+  if (accion === 'pausar' || accion === 'reanudar') {
+    const estado = accion === 'pausar' ? 'PAUSADA' : 'ACTIVA';
+    const perfilActual = leerData()[id];
 
-  if (accion === 'reanudar') {
-    cambiarEstadoPerfil(id, 'ACTIVA');
-    await responderCallback(callbackId, 'Perfil reanudado');
-    await enviarEstadoPerfil(id);
+    if (!perfilActual) {
+      await responderCallback(callbackId, 'Perfil '+id+' no encontrado');
+      return;
+    }
+
+    if (estado === 'ACTIVA' && planVencido(perfilActual)) {
+      await responderCallback(callbackId, 'Plan vencido: perfil '+id);
+      return;
+    }
+
+    const guardado = cambiarEstadoPerfil(id, estado);
+    const confirmado = leerData()[id];
+
+    if (!guardado || !confirmado || confirmado.estado !== estado) {
+      await responderCallback(
+        callbackId, 'No se pudo cambiar el estado del perfil '+id
+      );
+      return;
+    }
+
+    await responderCallback(
+      callbackId,
+      'Perfil '+id+': '+(estado === 'ACTIVA' ? 'REANUDADO' : 'PAUSADO')
+    );
+
+    try {
+      await enviarEstadoPerfil(id);
+    } catch (error) {
+      console.error(
+        '[CQ3 TELEGRAM INDIVIDUAL]',
+        id,
+        error.message
+      );
+    }
+
     return;
   }
 
