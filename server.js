@@ -120,6 +120,83 @@ app.post('/accion', async (req, res, next) => {
 });
 
 require('./seguridad_admin')(app);
+
+// CQ3_VINCULAR_LOBO_ADMIN_V1
+// Estas rutas estan DESPUES de seguridad_admin.
+// Solo una sesion administrativa valida puede utilizarlas.
+app.get('/cq3-vincular-lobo', (req, res) => {
+  if (req.admin !== true) return res.sendStatus(403);
+
+  const data = leerData();
+  const escapar = x => String(x).replace(/[&<>"']/g, c => ({
+    '&':'&amp;', '<':'&lt;', '>':'&gt;',
+    '"':'&quot;', "'":'&#39;'
+  })[c]);
+
+  const opciones = Object.keys(data).map(id => {
+    const vinculado = Boolean(String(data[id]?.cliente_token || '').trim());
+    return '<option value="' + escapar(id) + '">' +
+      escapar(id) + ' — ' + escapar(data[id]?.nombre || 'Perfil') +
+      (vinculado ? ' (con clave)' : ' (sin clave)') +
+      '</option>';
+  }).join('');
+
+  res.set('Cache-Control', 'no-store');
+  res.type('html').send(`<!doctype html>
+<html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Vincular lobito · Panel 3</title></head>
+<body style="font:16px Arial;max-width:540px;margin:40px auto;padding:20px">
+<h2>Vincular lobito · Panel 3</h2>
+<p>Selecciona el perfil y escribe la misma clave que utilizas en el lobito.</p>
+${req.query.ok === '1' ? '<p style="color:green">Clave vinculada correctamente.</p>' : ''}
+<form method="POST" action="/cq3-vincular-lobo">
+<label>Perfil</label><p><select name="id" required style="width:100%;padding:12px">${opciones}</select></p>
+<label>Clave actual del lobito</label>
+<p><input name="clave" type="password" minlength="4" maxlength="128"
+required autocomplete="off" style="width:95%;padding:12px"></p>
+<button type="submit" style="padding:12px 20px">Guardar vinculación</button>
+</form>
+<p>Este proceso no modifica el estado, la programación ni los datos del perfil.</p>
+<p><a href="/">Volver al panel</a></p>
+</body></html>`);
+});
+
+app.post('/cq3-vincular-lobo', (req, res) => {
+  if (req.admin !== true) return res.sendStatus(403);
+
+  const origen = req.get('origin');
+  const esperado =
+    (req.get('x-forwarded-proto') || req.protocol) +
+    '://' + req.get('host');
+
+  if (!origen || origen !== esperado) {
+    return res.sendStatus(403);
+  }
+
+  const id = String(req.body?.id || '').trim();
+  const clave = String(req.body?.clave || '').trim();
+
+  if (!/^[A-Za-z0-9_-]{1,50}$/.test(id) ||
+      clave.length < 4 || clave.length > 128) {
+    return res.status(400).send('Datos invalidos');
+  }
+
+  const data = leerData();
+
+  if (!Object.prototype.hasOwnProperty.call(data, id)) {
+    return res.status(404).send('Perfil no encontrado');
+  }
+
+  data[id].cliente_token = clave;
+
+  if (!guardarData(data)) {
+    return res.status(500).send('No se pudo guardar la vinculacion');
+  }
+
+  return res.redirect(303, '/cq3-vincular-lobo?ok=1');
+});
+
 require('./admin_api')(app);
 const PORT = Number(process.env.PORT || 3003);
 
