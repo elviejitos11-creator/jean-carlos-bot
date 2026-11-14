@@ -85,7 +85,7 @@ app.post('/accion', async (req, res, next) => {
 
   if (!esperado || !recibido) {
     return res.status(401).json({
-      ok: false, error: 'Token obligatorio'
+      ok: false, error: !esperado ? 'PERFIL_SIN_TOKEN' : 'LOBO_SIN_TOKEN'
     });
   }
 
@@ -95,7 +95,7 @@ app.post('/accion', async (req, res, next) => {
   if (a.length !== b.length ||
       !require('crypto').timingSafeEqual(a, b)) {
     return res.status(401).json({
-      ok: false, error: 'Token incorrecto'
+      ok: false, error: 'TOKEN_NO_COINCIDE'
     });
   }
 
