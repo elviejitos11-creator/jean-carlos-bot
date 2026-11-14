@@ -37,6 +37,86 @@ require('./cliente_api')(app, {
       reply_markup: require('./cliente_botones').botones(cliente, id)
     })
 });
+
+// CQ3_LOBO_ACCION_V2
+const cq3LoboOrigenes = new Set([
+  'https://megapersonals.eu',
+  'https://www.megapersonals.eu'
+]);
+
+app.options('/accion', (req, res, next) => {
+  if (!cq3LoboOrigenes.has(req.get('origin'))) {
+    return next();
+  }
+
+  res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.set('Access-Control-Allow-Headers',
+    'Content-Type, X-Cliente-Token');
+  res.set('Vary', 'Origin');
+
+  return res.sendStatus(204);
+});
+
+app.post('/accion', async (req, res, next) => {
+  if (!cq3LoboOrigenes.has(req.get('origin'))) {
+    return next();
+  }
+
+  const id = String(req.body?.id || '');
+  const accion = String(req.body?.accion || '');
+
+  if (!/^[A-Za-z0-9_-]{1,50}$/.test(id) ||
+      !['pausar', 'reanudar'].includes(accion)) {
+    return res.status(400).json({
+      ok: false, error: 'Orden no permitida'
+    });
+  }
+
+  const perfil = leerData()[id];
+
+  if (!perfil) {
+    return res.status(404).json({
+      ok: false, error: 'Perfil no encontrado'
+    });
+  }
+
+  const esperado = String(perfil.cliente_token || '').trim();
+  const recibido = String(req.get('x-cliente-token') || '').trim();
+
+  if (!esperado || !recibido) {
+    return res.status(401).json({
+      ok: false, error: 'Token obligatorio'
+    });
+  }
+
+  const a = Buffer.from(recibido, 'utf8');
+  const b = Buffer.from(esperado, 'utf8');
+
+  if (a.length !== b.length ||
+      !require('crypto').timingSafeEqual(a, b)) {
+    return res.status(401).json({
+      ok: false, error: 'Token incorrecto'
+    });
+  }
+
+  const estado = accion === 'pausar' ? 'PAUSADA' : 'ACTIVA';
+
+  if (!cambiarEstadoPerfil(id, estado)) {
+    return res.status(409).json({
+      ok: false,
+      error: 'Estado no guardado o plan vencido'
+    });
+  }
+
+  try {
+    await enviarEstadoPerfil(id);
+  } catch (e) {
+    console.error('Aviso Telegram CQ3:', e.message);
+  }
+
+  return res.json({ ok: true, estado });
+});
+
 require('./seguridad_admin')(app);
 require('./admin_api')(app);
 const PORT = Number(process.env.PORT || 3003);
