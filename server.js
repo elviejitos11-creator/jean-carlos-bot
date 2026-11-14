@@ -2302,7 +2302,7 @@ app.post('/guardar-perfil', (req, res) => {
 
   data[id].nombre = nombre || `Perfil ${id}`;
   data[id].chat_id = chat_id || '';
-  data[id].cliente_token = cliente_token || '';
+  data[id].cliente_token = String(cliente_token || '').trim() || data[id].cliente_token || '';
   data[id].telefono = telefono || '';
   data[id].codigo = codigo || '';
   data[id].ubicacion = ubicacion || '';
