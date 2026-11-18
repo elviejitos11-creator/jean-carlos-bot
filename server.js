@@ -2333,7 +2333,32 @@ app.post('/admin/panel/:cid/accion',
       res.redirect = () => redirigir(pref);
 
       return Promise.resolve(
-        cqHandler('post', '/accion')(req, res, next)
+        (
+          // CQ3_CLIENTE_RUTA_ORIGINAL_V1
+          (() => {
+            const stack =
+              (app.router && app.router.stack) ||
+              (app._router && app._router.stack) || [];
+
+            const rutas = stack.filter(layer =>
+              layer.route &&
+              layer.route.path === '/accion' &&
+              layer.route.methods.post
+            );
+
+            if (rutas.length !== 2) {
+              throw new Error(
+                'No se pudo identificar la ruta original de accion'
+              );
+            }
+
+            // La primera ruta es del lobito.
+            // La segunda es el motor original del panel.
+            return rutas[1].route.stack[0].handle(
+              req, res, next
+            );
+          })()
+        )
       ).catch(next);
     } catch(e) { next(e); }
   });
