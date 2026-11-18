@@ -1397,6 +1397,108 @@ app.post('/registrar-evento', async (req, res) => {
 // =========================
 // TELEGRAM CALLBACKS
 // =========================
+
+// CQ3_TELEGRAM_GRUPOS_AISLADOS_V1
+// Exclusivo para los botones generales de cada chat de Telegram.
+// No reemplaza las funciones globales del administrador.
+const cq3ColasPorChat = new Map();
+
+function cq3PerfilesDeChat(chatId) {
+  const grupo=String(chatId || '').trim();
+  if (!grupo) return [];
+
+  const datos=leerData();
+
+  return Object.keys(datos).filter(id =>
+    String(datos[id]?.chat_id || '').trim() === grupo
+  );
+}
+
+function cq3CancelarColaChat(chatId) {
+  const grupo=String(chatId);
+  const cola=cq3ColasPorChat.get(grupo);
+
+  if (!cola) return;
+
+  cola.cancelada=true;
+  if (cola.timer) clearTimeout(cola.timer);
+  cq3ColasPorChat.delete(grupo);
+}
+
+function cq3PausarSoloGrupo(chatId) {
+  const grupo=String(chatId);
+  cq3CancelarColaChat(grupo);
+
+  let cambiados=0;
+
+  for (const id of cq3PerfilesDeChat(grupo)) {
+    if (cambiarEstadoPerfil(id,'PAUSADA')) cambiados++;
+  }
+
+  return cambiados;
+}
+
+function cq3ReanudarSoloGrupo(chatId) {
+  const grupo=String(chatId);
+
+  cq3CancelarColaChat(grupo);
+
+  const ids=cq3PerfilesDeChat(grupo);
+  if (!ids.length) return 0;
+
+  const cola={
+    ids:[...ids],
+    timer:null,
+    cancelada:false
+  };
+
+  cq3ColasPorChat.set(grupo,cola);
+
+  async function siguiente() {
+    if (cola.cancelada ||
+        cq3ColasPorChat.get(grupo)!==cola) return;
+
+    const id=cola.ids.shift();
+
+    if (id === undefined) {
+      cq3ColasPorChat.delete(grupo);
+      return;
+    }
+
+    try {
+      // Verificar nuevamente el propietario justo antes de actuar.
+      const actual=leerData()[id];
+
+      if (String(actual?.chat_id || '').trim()===grupo) {
+        const ok=cambiarEstadoPerfil(id,'ACTIVA');
+
+        await enviarTexto(
+          ok
+            ? 'Perfil '+id+' reanudado en cola.'
+            : 'Perfil '+id+': no se pudo reanudar.',
+          grupo
+        );
+
+        if (ok) await enviarEstadoPerfil(id);
+      }
+    } catch (error) {
+      console.error('[CQ3 COLA GRUPO]',error.message);
+    }
+
+    if (cola.cancelada ||
+        cq3ColasPorChat.get(grupo)!==cola) return;
+
+    if (cola.ids.length) {
+      cola.timer=setTimeout(siguiente,45000);
+    } else {
+      cq3ColasPorChat.delete(grupo);
+    }
+  }
+
+  void siguiente();
+  return ids.length;
+}
+
 async function procesarCallback(q) {
   if (await require('./cliente_botones').manejar(q,apiTelegram)) return;
   const data = q.data || '';
@@ -1404,17 +1506,47 @@ async function procesarCallback(q) {
   const chatId = q.message?.chat?.id || CHAT_ID;
 
   if (data === 'pausar_todas') {
-    cancelarColaReanudacion();
-    cambiarEstadoTodos('PAUSADA');
-    await responderCallback(callbackId, 'Todas pausadas');
-    await enviarTexto('⏸ Todas las páginas quedaron en PAUSADA. Cola cancelada.', chatId);
+    const grupo = q.message?.chat?.id;
+
+    if (grupo == null) {
+      await responderCallback(callbackId, 'Grupo no identificado');
+      return;
+    }
+
+    const total = cq3PausarSoloGrupo(grupo);
+
+    await responderCallback(
+      callbackId,
+      'Perfiles de este grupo pausados: ' + total
+    );
+
+    await enviarTexto(
+      'Pausados ' + total + ' perfiles de este grupo.',
+      grupo
+    );
     return;
   }
 
   if (data === 'reanudar_todas') {
-    reanudarTodasEnCola();
-    await responderCallback(callbackId, 'Reanudando en cola');
-    await enviarTexto('▶️ Reanudando todas en cola cada 45 segundos.', chatId);
+    const grupo = q.message?.chat?.id;
+
+    if (grupo == null) {
+      await responderCallback(callbackId, 'Grupo no identificado');
+      return;
+    }
+
+    const total = cq3ReanudarSoloGrupo(grupo);
+
+    await responderCallback(
+      callbackId,
+      'Reanudando perfiles de este grupo: ' + total
+    );
+
+    await enviarTexto(
+      'Reanudando ' + total +
+      ' perfiles de este grupo, cada 45 segundos.',
+      grupo
+    );
     return;
   }
 
