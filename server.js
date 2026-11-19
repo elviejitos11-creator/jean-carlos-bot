@@ -536,10 +536,7 @@ function convertirFinPlan(valor) {
     if (dias===0)
       return new Date(Date.now()-1000).toISOString();
 
-    const fecha=new Date();
-    fecha.setDate(fecha.getDate()+dias);
-    fecha.setHours(23,59,59,0);
-    return fecha.toISOString();
+    return new Date(Date.now()+dias*86400000).toISOString();
   }
 
   return valor;
@@ -670,7 +667,7 @@ async function enviarFoto(photo, caption, id) {
 
   const texto = String(caption || '');
   const corto = texto.length > 1000
-    ? texto.slice(0, 950) + '\n📄 Información completa en el siguiente mensaje.'
+    ? texto.slice(0, 950) + '\n📄 Descripción resumida.'
     : texto;
 
   const payload = {
@@ -682,12 +679,7 @@ async function enviarFoto(photo, caption, id) {
 
   const res = await apiTelegram('sendPhoto', payload);
 
-  if (res?.ok) {
-    if (texto.length > 1000) {
-      await enviarTexto(texto, destino, id);
-    }
-    return true;
-  }
+  if (res?.ok) { return true; }
 
   await enviarTexto(texto, destino, id);
   return false;
@@ -709,7 +701,7 @@ async function enviarBufferComoFoto(buffer, caption, id, filename = 'ultimo_bump
 
   const texto = String(caption || '');
   const corto = texto.length > 1000
-    ? texto.slice(0, 950) + '\n📄 Información completa en el siguiente mensaje.'
+    ? texto.slice(0, 950) + '\n📄 Descripción resumida.'
     : texto;
 
   if (!FormData) {
@@ -728,12 +720,7 @@ async function enviarBufferComoFoto(buffer, caption, id, filename = 'ultimo_bump
 
   const res = await apiTelegramForm('sendPhoto', form);
 
-  if (res?.ok) {
-    if (texto.length > 1000) {
-      await enviarTexto(texto, destino, id);
-    }
-    return true;
-  }
+  if (res?.ok) { return true; }
 
   await enviarTexto(texto, destino, id);
   return false;
