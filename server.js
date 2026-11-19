@@ -397,6 +397,7 @@ function asegurarPerfil(data, id) {
       chat_id: '',
       cliente_token: '',
       telefono: '',
+      categoria: "",
       codigo: '',
       ubicacion: '',
       texto: '',
@@ -645,22 +646,29 @@ async function enviarFoto(photo, caption, id) {
   const perfil = data[id];
   const destino = perfil?.chat_id || CHAT_ID;
 
-  const res = await apiTelegram('sendPhoto', {
+  const texto = String(caption || '');
+  const corto = texto.length > 1000
+    ? texto.slice(0, 950) + '\n📄 Información completa en el siguiente mensaje.'
+    : texto;
+
+  const payload = {
     chat_id: destino,
     photo,
-    caption,
+    caption: corto,
     reply_markup: tecladoTelegram(id)
-  });
+  };
 
-  if (!res || !res.ok) {
-    await apiTelegram('sendMessage', {
-      chat_id: destino,
-      text: caption,
-      reply_markup: tecladoTelegram(id)
-    });
+  const res = await apiTelegram('sendPhoto', payload);
+
+  if (res?.ok) {
+    if (texto.length > 1000) {
+      await enviarTexto(texto, destino, id);
+    }
+    return true;
   }
 
-  return !!(res && res.ok);
+  await enviarTexto(texto, destino, id);
+  return false;
 }
 
 function esImagenBase64(valor) {
@@ -677,14 +685,19 @@ async function enviarBufferComoFoto(buffer, caption, id, filename = 'ultimo_bump
   const perfil = data[id];
   const destino = perfil?.chat_id || CHAT_ID;
 
+  const texto = String(caption || '');
+  const corto = texto.length > 1000
+    ? texto.slice(0, 950) + '\n📄 Información completa en el siguiente mensaje.'
+    : texto;
+
   if (!FormData) {
-    await enviarTexto('⚠️ Falta form-data. Corre: npm install form-data', destino, id);
+    await enviarTexto(texto, destino, id);
     return false;
   }
 
   const form = new FormData();
   form.append('chat_id', String(destino));
-  form.append('caption', caption);
+  form.append('caption', corto);
   form.append('reply_markup', JSON.stringify(tecladoTelegram(id)));
   form.append('photo', buffer, {
     filename,
@@ -693,14 +706,14 @@ async function enviarBufferComoFoto(buffer, caption, id, filename = 'ultimo_bump
 
   const res = await apiTelegramForm('sendPhoto', form);
 
-  if (res && res.ok) return true;
+  if (res?.ok) {
+    if (texto.length > 1000) {
+      await enviarTexto(texto, destino, id);
+    }
+    return true;
+  }
 
-  await apiTelegram('sendMessage', {
-    chat_id: destino,
-    text: caption,
-    reply_markup: tecladoTelegram(id)
-  });
-
+  await enviarTexto(texto, destino, id);
   return false;
 }
 
@@ -1078,9 +1091,10 @@ async function enviarUltimaActualizacion(id) {
 🚀 Y que la próxima te deje aún más ganancias
 📄 Información:
 
-📞 Número: ${perfil.telefono}
-🆔 Código: ${perfil.codigo}
-📍 Ubicación: ${perfil.ubicacion}
+📞 Número: ${perfil.telefono || 'N/A'}
+🆔 Código: ${perfil.codigo || 'N/A'}
+📍 Ubicación: ${perfil.ubicacion || 'N/A'}
+📂 Category: ${perfil.categoria || 'N/A'}
 📝 Texto: ${perfil.texto || 'N/A'}
 🟢 Estado: ${perfil.estado}
 🕒 Hora del bump: ${perfil.ultima_hora}
@@ -1090,12 +1104,13 @@ async function enviarUltimaActualizacion(id) {
 📊 Bump hoy: ${perfil.bump_hoy || 0}
 📈 Bump total: ${perfil.bump_total || 0}`;
 
-  if (perfil.foto_bump) {
-    const ok = await enviarFotoFlexible(perfil.foto_bump, caption, id);
-    if (ok) return;
-  }
+  const foto = perfil.foto_bump || perfil.foto_modelo || perfil.foto_pagina;
 
-  await enviarFoto(perfil.foto_modelo, caption, id);
+  if (foto) {
+    await enviarFotoFlexible(foto, caption, id);
+  } else {
+    await enviarTexto(caption, perfil.chat_id || CHAT_ID, id);
+  }
 }
 
 async function enviarFotoPagina(id) {
@@ -1135,38 +1150,23 @@ async function enviarAlbumCompleto(id) {
   const perfil = data[id];
   if (!perfil) return;
 
-  const destino = perfil?.chat_id || CHAT_ID;
-  const fotos = Array.isArray(perfil.historial_fotos) ? perfil.historial_fotos : [];
+  const destino = perfil.chat_id || CHAT_ID;
+  const fotos = Array.isArray(perfil.historial_fotos)
+    ? perfil.historial_fotos.filter(Boolean)
+    : [];
 
-  if (fotos.length === 0) {
-    await enviarTexto(`⚠️ No hay fotos guardadas para el perfil ${id}`, destino, id);
+  if (!fotos.length) {
+    await enviarTexto(
+      `⚠️ No hay fotografías guardadas para el perfil ${id}`,
+      destino, id
+    );
     return;
   }
 
-  const lista = fotos.filter(Boolean).slice(0, 10);
-
-  if (lista.length === 1) {
-    await enviarFoto(lista[0], `🗂 Álbum completo\nFoto 1 de 1`, id);
-    return;
+  for (let i = 0; i < fotos.length; i++) {
+    const caption = `🗂 Álbum completo\n📸 Foto ${i + 1} de ${fotos.length}`;
+    await enviarFotoFlexible(fotos[i], caption, id);
   }
-
-  const media = lista.map((foto, index) => ({
-    type: 'photo',
-    media: foto,
-    caption: index === 0 ? `🗂 Álbum completo\n${lista.length} fotos guardadas` : undefined
-  }));
-
-  const res = await apiTelegram('sendMediaGroup', {
-    chat_id: destino,
-    media
-  });
-
-  if (!res || !res.ok) {
-    await enviarUltimasFotos(id, 10);
-    return;
-  }
-
-  await enviarTexto('🗂 Álbum completo enviado.', destino, id);
 }
 
 async function enviarReglas(chatId = CHAT_ID) {
@@ -1277,6 +1277,7 @@ app.post('/registrar-evento', async (req, res) => {
     id,
     tipo = 'silencioso',
     telefono,
+    categoria,
     codigo,
     ubicacion,
     texto,
@@ -1311,6 +1312,7 @@ app.post('/registrar-evento', async (req, res) => {
   }
 
   if (telefono) perfil.telefono = telefono;
+  if (typeof categoria === "string" && categoria.trim()) perfil.categoria = categoria.trim();
   if (codigo) perfil.codigo = codigo;
   if (ubicacion) perfil.ubicacion = ubicacion;
   if (typeof texto === 'string') perfil.texto = texto;
@@ -1332,7 +1334,7 @@ app.post('/registrar-evento', async (req, res) => {
       .filter(foto => foto && typeof foto === 'string')
       .slice(0, 10);
 
-    if (fotosLimpias.length >= 3) {
+    if (fotosLimpias.length >= 2) {
       perfil.historial_fotos = fotosLimpias;
       perfil.foto_pagina = fotosLimpias[0] || perfil.foto_pagina;
       perfil.foto_modelo = fotosLimpias[0] || perfil.foto_modelo;
