@@ -1174,23 +1174,60 @@ async function enviarAlbumCompleto(id) {
 
   const destino = perfil.chat_id || CHAT_ID;
   const fotos = Array.isArray(perfil.historial_fotos)
-    ? perfil.historial_fotos.filter(Boolean)
+    ? [...new Set(perfil.historial_fotos.filter(Boolean))]
     : [];
 
-  if (!fotos.length) {
+  if (fotos.length === 0) {
     await enviarTexto(
-      `⚠️ No hay fotografías guardadas para el perfil ${id}`,
+      '⚠️ No hay fotos guardadas para este perfil.',
       destino, id
     );
     return;
   }
 
-  for (let i = 0; i < fotos.length; i++) {
-    const caption = `🗂 Álbum completo\n📸 Foto ${i + 1} de ${fotos.length}`;
-    await enviarFotoFlexible(fotos[i], caption, id);
+  if (fotos.length === 1) {
+    await enviarFotoFlexible(
+      fotos[0],
+      '🗂 Álbum completo\n1 foto guardada',
+      id
+    );
+    return;
+  }
+
+  for (let i = 0; i < fotos.length; i += 10) {
+    const grupo = fotos.slice(i, i + 10);
+
+    if (grupo.length === 1) {
+      await enviarFotoFlexible(
+        grupo[0],
+        '🗂 Última foto del álbum',
+        id
+      );
+      continue;
+    }
+
+    const media = grupo.map((foto, index) => ({
+      type: 'photo',
+      media: foto,
+      ...(index === 0 ? {
+        caption: `🗂 Álbum completo\n${fotos.length} fotos guardadas`
+      } : {})
+    }));
+
+    const res = await apiTelegram('sendMediaGroup', {
+      chat_id: destino,
+      media
+    });
+
+    if (!res || !res.ok) {
+      await enviarTexto(
+        '⚠️ No se pudo enviar el álbum agrupado.',
+        destino
+      );
+      return;
+    }
   }
 }
-
 async function enviarReglas(chatId = CHAT_ID) {
   await enviarTexto(RULES_TEXT, chatId);
 }
