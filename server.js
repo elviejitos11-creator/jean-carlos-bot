@@ -12,6 +12,28 @@ try {
 }
 
 const app = express();
+/* CQ3_CORS_PREFLIGHT_V1 */
+app.use('/registrar-evento', (req, res, next) => {
+  if (req.method !== 'OPTIONS') return next();
+
+  const origin = req.headers.origin || '';
+
+  if (!/^https?:\/\/([a-z0-9-]+\.)*megapersonals\.eu(?::\d+)?$/i.test(origin)) {
+    return res.sendStatus(403);
+  }
+
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'Content-Type, X-Cliente-Token'
+  );
+  res.setHeader('Access-Control-Max-Age', '600');
+
+  return res.status(204).end();
+});
+/* FIN CQ3_CORS_PREFLIGHT_V1 */
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 
