@@ -15,3 +15,7 @@ RESCATE*/
 *.zip
 
 server_prueba_local.js
+.cq_telegram_pendientes/
+cq_fallos/
+CQ_RESPALDO_NOTIFICACIONES/
+cq_prueba_telegram_real.js
