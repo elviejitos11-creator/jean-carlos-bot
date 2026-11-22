@@ -142,6 +142,7 @@ app.post('/accion', async (req, res, next) => {
 });
 
 require('./seguridad_admin')(app);
+require('./cq_revision_manual')(app);
 
 // CQ3_VINCULAR_LOBO_ADMIN_V1
 // Estas rutas estan DESPUES de seguridad_admin.
