@@ -11,9 +11,10 @@ const {
 } = require('./cq_historial_seguridad');
 
 const registrar = crearRegistroAlertas();
+const { crearNotificador } = require('./cq_notificar_seguridad');
 
-module.exports = function instalarRevisionManual(app) {
-  app.post('/admin/incidencia-seguridad', (req, res) => {
+module.exports = function instalarRevisionManual(app, opciones = {}) {
+  app.post('/admin/incidencia-seguridad', async (req, res) => {
     if (req.admin !== true) {
       return res.sendStatus(403);
     }
@@ -48,9 +49,29 @@ module.exports = function instalarRevisionManual(app) {
 
       guardarIncidencia(directorio, evento);
 
+      let notificada = false;
+
+      try {
+        const datos = opciones.leerData?.();
+
+        const registro = datos &&
+          Object.prototype.hasOwnProperty.call(datos, perfil)
+          ? datos[perfil]
+          : null;
+
+        const destino = String(registro?.chat_id || '').trim();
+
+        if (destino && typeof opciones.enviarTexto === 'function') {
+          const notificar = crearNotificador(opciones.enviarTexto);
+          notificada = await notificar(evento, destino);
+        }
+      } catch (error) {
+        console.error('[CQ3 SEGURIDAD] Error notificando incidencia');
+      }
+
       return res.json({
         ok: true,
-        revision_manual: true
+        revision_manual: true, notificada
       });
     } catch (error) {
       return res.status(500).json({

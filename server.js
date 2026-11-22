@@ -142,7 +142,13 @@ app.post('/accion', async (req, res, next) => {
 });
 
 require('./seguridad_admin')(app);
-require('./cq_revision_manual')(app);
+require('./cq_revision_manual')(app, {
+  leerData,
+  enviarTexto: (texto, chatId) => apiTelegram('sendMessage', {
+    chat_id: chatId,
+    text: texto
+  })
+});
 
 // CQ3_VINCULAR_LOBO_ADMIN_V1
 // Estas rutas estan DESPUES de seguridad_admin.
