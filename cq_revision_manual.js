@@ -14,6 +14,50 @@ const registrar = crearRegistroAlertas();
 const { crearNotificador } = require('./cq_notificar_seguridad');
 
 module.exports = function instalarRevisionManual(app, opciones = {}) {
+
+  app.get('/admin/historial-seguridad', (req, res) => {
+    if (req.admin !== true) {
+      return res.sendStatus(403);
+    }
+
+    try {
+      const fs = require('fs');
+      const archivo = path.join(
+        process.env.CQ_DATA_DIR || __dirname,
+        'seguridad',
+        'incidencias_seguridad.jsonl'
+      );
+
+      res.setHeader('Cache-Control', 'no-store');
+
+      if (!fs.existsSync(archivo)) {
+        return res.json({ ok: true, incidencias: [] });
+      }
+
+      const incidencias = fs.readFileSync(archivo, 'utf8')
+        .split(/\r?\n/)
+        .filter(Boolean)
+        .slice(-100)
+        .reverse()
+        .map(linea => {
+          try {
+            return JSON.parse(linea);
+          } catch {
+            return null;
+          }
+        })
+        .filter(Boolean);
+
+      return res.json({ ok: true, incidencias });
+
+    } catch (error) {
+      return res.status(500).json({
+        ok: false,
+        error: 'No se pudo consultar el historial'
+      });
+    }
+  });
+
   app.post('/admin/incidencia-seguridad', async (req, res) => {
     if (req.admin !== true) {
       return res.sendStatus(403);
